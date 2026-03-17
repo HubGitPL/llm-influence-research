@@ -13,6 +13,9 @@ liczba aktywnych kontrybutorów
 czas od zgłoszenia problemu do jego zamknięcia.
 ## Zespol
 Mateusz F
+
 Damian T
+
 Jan S
+
 Igor R
