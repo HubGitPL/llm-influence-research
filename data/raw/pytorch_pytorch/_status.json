@@ -1,0 +1,7 @@
+{
+  "commits": true,
+  "prs": true,
+  "issues": true,
+  "contributors": true,
+  "releases": true
+}
