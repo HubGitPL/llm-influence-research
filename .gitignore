@@ -1,0 +1,32 @@
+# System
+.DS_Store
+Thumbs.db
+.claude/
+.planning/
+CLAUDE.md
+.cursor/
+.aider*
+.continue/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+tests/
+sandbox/
