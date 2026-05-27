@@ -1,0 +1,953 @@
+\documentclass[12pt,a4paper]{article}
+
+% Kodowanie i polski
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[polish]{babel}
+\usepackage{lmodern}
+
+% Marginesy i typografia
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{microtype}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{indentfirst}
+
+% Kod źródłowy
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstdefinestyle{envstyle}{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    rulecolor=\color{gray!50},
+    xleftmargin=5pt,
+    xrightmargin=5pt,
+    aboveskip=10pt,
+    belowskip=10pt
+}
+
+% Grafika i podpisy
+\usepackage{graphicx}
+\graphicspath{{./}{./figures/}}
+\usepackage{float}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+
+% Bibliografia: numeryczna, kolejność wg cytowań
+\usepackage{csquotes}
+\usepackage[backend=biber,style=numeric-comp,sorting=none,maxbibnames=99]{biblatex}
+\addbibresource{bibliografia.bib}
+
+% Linki i odwołania
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=black,
+  pdfauthor={},
+  pdftitle={Praca dyplomowa inżynierska}
+}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+
+
+\usepackage{tikz}
+\usetikzlibrary{positioning, shapes, arrows.meta, fit, backgrounds}
+% \usepackage{pgf-umlsd}
+\usetikzlibrary{calc}
+% Listy
+\usepackage{enumitem}
+\setlist{itemsep=0.25em, topsep=0.25em}
+
+
+
+% Nagłówki/stopki
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{System STOS — praca dyplomowa}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Głębia numeracji i spisu treści
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+
+\begin{document}
+
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+\section{Architektura STOS 2025 (Damian Trowski)}
+\subsection{Założenia dotyczące architektury systemu STOS}
+% Krótki wstęp oraz podział założeń na te przyjęte z góry i przyjęte w trakcie projektowania
+System STOS został zaprojektowany z myślą o bezpiecznym, skalowalnym i łatwym w utrzymaniu środowisku do uruchamiania i oceniania zadań programistycznych. Poniżej założenia zostały podzielone na dwie grupy: te przyjęte z góry (wymagania wyjściowe) oraz te, które zostały przyjęte/sprecyzowane w trakcie projektowania.
+
+\subsubsection*{Założenia przyjęte z góry}
+\begin{itemize}
+    \item Przetwarzanie zgłoszeń studentów zawierających kod źródłowy rozwiązań zadań programistycznych w ramach przepływu opartym o konteneryzację. Wstępne załażenia zakładały podział procesu przetwarzania na 3 etapy: kompilacji, wykonania i oceny wyników.
+    \item Ze wzgłedu na doświadczenia z poprzednich wersji systemu STOS, przyjęto, że podczas projektowania systemu należy położyć nacisk na bezpieczeństwo (izolacja uruchamianych procesów) oraz stabilność (odporność na błędy i awarie), nawet jeżeli miałoby to skutkować pewnym spadkiem wydajności.
+    \item Integracja i kompatybilność z istniejącym interfejsem graficznym STOS (np. \url{https://stos.eti.pg.gda.pl/}), umożliwiająca wykorzystanie obecnych mechanizmów oraz interfejsu systemu.
+    \item Wsparcie dla wielu języków programowania, z możliwością łatwego dodawania nowych języków w przyszłości.
+    \item System monitorowania i logowania zdarzeń, umożliwiający śledzenie stanu zadań, diagnozowanie problemów oraz analizę wydajności.
+\end{itemize}
+
+\subsubsection*{Założenia przyjęte w trakcie projektowania}
+\begin{itemize}
+    \item Modularna architektura systemu, umożliwiająca niezależny rozwój i skalowanie poszczególnych komponentów.
+    \item Wykorzystanie dockera jako głównej technologii konteneryzacji, ze względu na jego popularność, wsparcie społeczności oraz dostępność narzędzi.
+    \item //todo Implementacja całego systemu w postaci kontenerów Docker, co ułatwia wdrażanie, skalowanie i utrzymanie środowiska.
+    \item KISS --- Keep It Simple, Stupid: dążenie do prostoty w projektowaniu i implementacji, aby ułatwić przyszłą konserwację i rozwój systemu.
+    \item Brak ingerencji w istniejący System STOS, co pozwala na zachowanie kompatybilności z obecnymi użytkownikami i procesami.
+    \item Zapewnienie skalowalności poziomej poprzez możliwość uruchamiania wielu instancji komponentów wykonawczych (worker) w celu obsługi rosnącej liczby zadań.
+    \item Możliwość równoległego wdrożenia Systemu STOS obok istniejącej infrastruktury, co umożliwia stopniowe przejście i testowanie nowego systemu bez zakłócania bieżącej działalności.
+    \item Zapewnienie powtarzalności środowisk uruchomieniowych poprzez wersjonowanie obrazów kontenerów i konfiguracji.
+
+\end{itemize}
+
+Powyższe założenia stanowią podstawę dalszego opisu komponentów systemu oraz decyzji implementacyjnych opisanych w kolejnych podrozdziałach.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+\subsection{STOS GUI}
+
+Mianem STOS GUI określamy
+istniejący interfejs graficzny, który umożliwia użytkownikom (studentom i wykładowcom) interakcję z systemem STOS.\@ Interfejs ten jest m.in.\ dostępny pod adresem \url{https://stos.eti.pg.gda.pl/} i oferuje funkcje takie jak przesyłanie rozwiązań zadań programistycznych, przeglądanie wyników ocen oraz zarządzanie kontami użytkowników.
+
+W ramach projektu założono, że STOS GUI pozostanie niezmieniony i będzie współpracował z nowym systemem wykonawczym poprzez zdefiniowane API.\@ Dzięki temu możliwe jest zachowanie istniejącej funkcjonalności oraz interfejsu użytkownika, jednocześnie korzystając z nowych możliwości oferowanych przez skalowalną platformę serwerową.
+
+\subsubsection{HTTP API STOS GUI}
+Poniżej przedstawiono tabelę ilustrującą strukturę API STOS GUI, podzieloną na kontrolery.
+
+\begin{itemize}
+    \item qapi/qctrl.php --- Kontroler obsługujący kolejki zadań (m.in.\ pobieranie i dodawanie zadań).\@ Wybór akcji odbywa się przez parametr zapytania \texttt{f} z wartością z zestawu \{\texttt{get}, \texttt{add}, \texttt{result}, \texttt{notify}, \texttt{show}, \texttt{workset}\}. Wybór kolejki odbywa się przez parametr zapytania \texttt{name}.\@
+          \begin{itemize}
+              \item get --- pobranie następnego zadania z kolejki;\@ odpowiedź zawiera dane binarne zadania oraz dodatkowe nagłówki HTTP:\ \texttt{X-Server-Id}, \texttt{X-Queue-Name}, \texttt{X-Iv}, \texttt{X-Param}.
+              \item add --- dodanie nowego zadania do kolejki; oczekuje pliku przesłanego w multipart/form-data, parametru \texttt{pri} (priorytet) oraz \texttt{iv} (IV do odszyfrowania danych).
+              \item result --- oznaczenie zgłoszenia jako zakończone (wymaga parametru \texttt{id}).
+              \item notify --- aktualizacja statusu/progresu zgłoszenia (wymaga \texttt{id} i \texttt{info}).
+              \item show --- wypisanie zawartości kolejki (lista priorytetów, identyfikatorów i nazw).
+              \item workset --- wypisanie elementów workset (id, nazwa, adres IP, komunikat).
+          \end{itemize}
+
+
+
+    \item fsapi/fsctrl.php --- Kontroler odpowiedzialny za operacje na systemie plików. Kontroler obsługuje zestaw akcji określanych parametrem \texttt{f} i parametry wejściowe takie jak \texttt{name}, \texttt{pid}, \texttt{seq}, \texttt{offset} oraz \texttt{area}. Dostępne akcje to:
+          \begin{itemize}
+              \item \texttt{list} --- zwraca listę plików dla podanego \texttt{area} i \texttt{pid} (format: \texttt{name:size:time} w treści tekstowej). Wymaga parametrów \texttt{area} i \texttt{pid}.
+              \item \texttt{put} --- przesłanie fragmentu pliku w multipart/form-data; wymaga \texttt{area}, \texttt{pid}, \texttt{name} oraz \texttt{offset} (offset musi być wielokrotnością stałej CHUNK\_SIZE). Plik przesyłany jest jako pojedynczy plik w ciele żądania.
+              \item \texttt{get} --- pobranie całego pliku (sklejonego z fragmentów); zwraca nagłówki \texttt{Content-Type: application/octet-stream}, \texttt{Content-Length} i \texttt{Content-Disposition}. Wymaga \texttt{area}, \texttt{pid}, \texttt{name}.
+              \item \texttt{getc} --- pobranie pojedynczego fragmentu pliku określonego przez \texttt{offset} (zwraca surowe dane fragmentu); wymaga \texttt{area}, \texttt{pid}, \texttt{name} i \texttt{offset}.
+              \item \texttt{crc} --- obliczenie CRC pliku; zwraca 8-bajtową wartość tekstową. Wymaga \texttt{area}, \texttt{pid} i \texttt{name}.
+              \item \texttt{tag} --- zwraca znacznik/tag (np.\ wersję) zasobu dla podanego \texttt{area} i \texttt{pid} (zwraca tekst). Wymaga \texttt{area} i \texttt{pid}.
+              \item \texttt{del} --- usunięcie pliku; wymaga \texttt{area}, \texttt{pid} i \texttt{name}.
+              \item \texttt{init} --- inicjalizacja/dropping bazy (używane do przygotowania lub zresetowania magazynu plików).
+          \end{itemize}
+          Kontroler używa kodów odpowiedzi HTTP 400 (Bad request) dla nieprawidłowych parametrów, 404 (Not found) gdy zasób nie istnieje oraz 500 (Internal error) dla błędów serwera. Dla pobierania plików ustawiane są odpowiednie nagłówki binarne i długość treści; operacje zapisu przyjmują plik z \texttt{\$\_FILES} i zapisują fragmenty w bazie.
+
+
+
+    \item io-result.php --- Kontroler odpowiedzialny za przesyłanie wyników oceny zgłoszeń.
+          \begin{itemize}
+              \item Metoda: POST
+              \item Parametry (form-data):
+                    \begin{itemize}
+                        \item \texttt{id} (POST) --- server-id zgłoszenia (wymagane)
+                        \item pliki (FILES): \texttt{result} --- plik z wynikiem (opcjonalny, ale oczekiwany)
+                        \item pliki (FILES): \texttt{info} --- dodatkowe informacje/raport (opcjonalny)
+                        \item pliki (FILES): \texttt{debug} --- plik debug (opcjonalny)
+                    \end{itemize}
+              \item Zachowanie:
+                    \begin{itemize}
+                        \item Weryfikuje poprawność \texttt{id} i mapuje je na lokalne zgłoszenie. W przypadku nieznanego \texttt{id} zwraca błąd 400.
+                        \item Zapisuje odebrane pliki do bazy (funkcja AddFile) i powiązuje je z odpowiednim zgłoszeniem (result/info/debug).
+                        \item Parsuje plik \texttt{result} (jeżeli występuje) i wypełnia ocenę zgłoszenia, a także zapisuje dodatkowe dane (np.\ formaty info/debug) jeżeli są dostępne.
+                        \item Oznacza zadanie w kolejce jako zakończone (wywołanie MarkComplete w bazie kolejki).
+                        \item Zwraca tekstową odpowiedź 200 z treścią w formacie: \texttt{ok: [result] [info] [debug]} wskazującą które elementy zostały poprawnie zapisane. W przypadku błędów zwraca 400 z opisem.
+                    \end{itemize}
+          \end{itemize}
+\end{itemize}
+% \begin{table}[H]
+%     \centering
+%     \begin{tabular}{|l|l|l|l|}
+%         \hline
+%         \textbf{Kontroler}  & \textbf{Metoda}       & \textbf{Funckcja} & \textbf{Opis}                          \\ \hline
+%         qapi/qctrl.php      & GET                   & get               & Przesyłanie nowego zgłoszenia          \\ \hline
+%         qapi/qctrl.php      & POST /submissions     & notify            & Przesyłanie nowego zgłoszenia          \\ \hline
+%         fsapi/fsctrl.php    & GET /submissions/{id} & \textbf{Metoda}   & Pobieranie statusu zgłoszenia          \\ \hline
+%         io-result.php       & GET /results/{id}     & \textbf{Metoda}   & Pobieranie wyników oceny zgłoszenia    \\ \hline
+%         LanguagesController & GET /languages        & \textbf{Metoda}   & Pobieranie listy obsługiwanych języków \\ \hline
+%     \end{tabular}
+%     \caption{Struktura API STOS GUI}
+%     \label{tab:stos_gui_api}
+% \end{table}
+
+
+\subsubsection{System kolejek STOS GUI}
+System kolejek w STOS GUI zarządza przepływem zgłoszeń zadań programistycznych, umożliwiając ich efektywne przetwarzanie przez komponenty wykonawcze. Kolejki te są wykorzystywane do przechowywania zgłoszeń oczekujących na przetworzenie.\@ Poniżej przedstawiono główne funkcje i mechanizmy działania systemu kolejek w STOS GUI:\
+\begin{itemize}
+    \item Tworzenie i zarządzanie kolejkami: STOS GUI umożliwia tworzenie wielu kolejek.\@ Administratorzy mogą zarządzać kolejkami, definiując ich właściwości i reguły przetwarzania.
+    \item Dodawanie zgłoszeń do kolejek: Gdy użytkownik przesyła zgłoszenie zadania programistycznego, STOS GUI umieszcza je w odpowiedniej kolejce na podstawie definicji zadania.
+    \item Pobieranie zgłoszeń przez workery: Workery okresowo sprawdzają kolejki w STOS GUI (Polling), pobierając dostępne zgłoszenia do przetworzenia.
+    \item Aktualizacja statusu zgłoszeń: Po przetworzeniu zgłoszenia przez workera, STOS GUI aktualizuje jego status w kolejce, informując o zakończeniu przetwarzania oraz ewentualnych wynikach oceny.
+    \item Monitorowanie i raportowanie: System kolejek w STOS GUI oferuje mechanizmy monitorowania stanu kolejek, umożliwiając administratorom śledzenie liczby zgłoszeń oczekujących na przetworzenie oraz analizę wydajności systemu.\@ informacje te są dostępne poprzez interfejs graficzny.
+\end{itemize}
+
+\subsubsection{Konfiguracja zadań w STOS GUI}
+W STOS GUI zadania programistyczne są konfigurowane za pomocą specjalnych skryptów, które definiują kryteria oceniania oraz środowisko uruchomieniowe dla danego zadania. Skrypty te zawierają:
+\begin{itemize}
+    \item Definicje testów: Określają, jakie testy mają być przeprowadzone na zgłoszonych rozwiązaniach, w tym parametry wejściowe, oczekiwane wyniki oraz limity czasowe i pamięciowe.
+\end{itemize}
+
+\paragraph{Przykład skryptu STOS GUI}
+
+Poniżej znajduje się przykładowy skrypt konfiguracyjny dla zadania programistycznego w STOS GUI:\
+
+\begin{samepage}
+\begin{lstlisting}[style=envstyle]
+##STOS_AUTOMATIC_SCRIPT_1_4##
+CU
+TST test.exe 500 262144 +info.txt program.out wsp0.in
+JUN judge.exe program.out wsp0.out wsp0.in info.txt %TESTID%
+TST test.exe 500 262144 +info.txt program.out wsp1.in
+JUN judge.exe program.out wsp1.out wsp1.in info.txt %TESTID%
+TST test.exe 500 212144 +info.txt program.out wsp2.in
+JUN judge.exe program.out wsp2.out wsp2.in info.txt %TESTID%
+CO
+TST fastheap test.exe 500 262144 +info.txt program.out wsp3.in
+JUN judge.exe program.out wsp3.out wsp3.in info.txt %TESTID%
+TST fastheap test.exe 1000 262144 +info.txt program.out wsp4.in
+JUN judge.exe program.out wsp4.out wsp4.in info.txt %TESTID%
+TST fastheap test.exe 2000 222144 +info.txt program.out wsp5.in
+JUN judge.exe program.out wsp5.out wsp5.in info.txt %TESTID%
+TST fastheap test.exe 3000 262144 +info.txt program.out wsp6.in
+JUN judge.exe program.out wsp6.out wsp6.in info.txt %TESTID%
+TST fastheap test.exe 3000 262144 +info.txt program.out wsp7.in
+JUN judge.exe program.out wsp7.out wsp7.in info.txt %TESTID%
+TST fastheap test.exe 3000 262144 +info.txt program.out wsp8.in
+JUN judge.exe program.out wsp8.out wsp8.in info.txt %TESTID%
+TST fastheap test.exe 3000 262144 +info.txt program.out wsp9.in
+JUN judge.exe program.out wsp9.out wsp9.in info.txt %TESTID%
+FIN jfinal.exe
+WR infoformat=html
+WR time=%TIME%
+\end{lstlisting}
+\end{samepage}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+\subsection{Architektura całościowa systemu}
+
+Poniżej przedstawiono dwie iteracje ogólnej architektury systemu STOS 2025: pierwszą, w której wprowadzono komponenty \textbf{master}, \textbf{worker} oraz \textbf{adapter}\footnote{nazwa adapter nie ma nic wspólnego ze wzorcem projektowym \#todo}, oraz drugą, uproszczoną wersję minimalną, w której każdy \textbf{worker} komunikuje się bezpośrednio z \textbf{STOS GUI}.
+
+
+\subsubsection{Pierwsza iteracja}
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1.8cm,
+        every node/.style={font=\small},
+        box/.style={
+                rectangle,
+                draw,
+                rounded corners,
+                minimum width=2.2cm,
+                minimum height=0.9cm,
+                align=center
+            },
+         % ------- STYLE Z KOLORAMI -------
+        worker/.style={
+            rectangle, draw, rounded corners,
+            fill=blue!15,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        master/.style={
+            rectangle, draw, rounded corners,
+            fill=red!20,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        helper/.style={
+            rectangle, draw, rounded corners,
+            fill=cyan!20,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        externbox/.style={
+            rectangle, draw, rounded corners,
+            fill=orange!20,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        telemetry/.style={
+            rectangle, draw, rounded corners,
+            fill=green!20,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        db/.style={
+                cylinder,
+                draw,
+                aspect=0.5,
+                shape border rotate=90,
+                minimum height=1cm,
+                minimum width=1cm,
+                fill=yellow!25
+            },
+        arrow/.style={-{Latex[length=2mm]}, thick}
+        ]
+
+        \node[worker] (worker1) {worker 1};
+        \node[worker, below=0.9cm of worker1] (worker2) {worker 2};
+        \node[worker, below=0.9cm of worker2] (worker3) {worker \dots};
+        \node[worker, below=0.9cm of worker3] (worker4) {worker n};
+
+        \node[master, right=4cm of worker1, yshift=-0.2cm] (master) {master};
+
+        \node[helper, below=6cm of master, xshift=-2cm] (stosAdapter) {adapter};
+
+        \node[db, right=3cm of stosAdapter] (taskCache) {task cache};
+
+        \node[telemetry, right=3cm of master] (telemetry) {telemetry};
+        \node[externbox, below=1cm of telemetry] (stosGui) {stos gui};
+
+        \node[draw, dashed, fit=(worker1)(worker2)(worker3)(worker4), inner sep=10pt, label=above:{\textbf{workers}}] (workers) {};
+
+        \node[draw, dashed, fit=(stosGui)(telemetry), inner sep=10pt, label=above:{\textbf{extern}}] (externGroup) {};
+
+
+        \draw[arrow] (worker1) -- (master) node[midway, above] {pobiera zgłoszenia} node[midway, below] {wysyła wyniki};
+        \draw[arrow, black!10] (worker2) -- (master);
+        \draw[arrow, black!10] (worker3) -- (master);
+        \draw[arrow, black!10] (worker4) -- (master);
+        \draw[arrow] (master) -- (telemetry) node[midway, above] {loguje};
+        \draw[arrow, black!10] (stosAdapter) -- (telemetry);
+
+
+        \draw[arrow] (stosAdapter) -- (master) node[midway, above] {przesyła zgłoszenia, pobiera wyniki};
+        \draw[arrow] (stosAdapter) -- (taskCache) node[midway, below] {pobiera pliki};
+        \draw[arrow] (stosAdapter) -- (stosGui) node[midway, above] {pobiera zgłoszenia} node[midway, below] {wysyła wyniki};
+        \draw[arrow, black!10] (taskCache) -- (stosGui);
+        
+    \end{tikzpicture}
+    \caption{Uproszczona architektura STOS 2025.}
+\end{figure}
+
+W pierwszej iteracji architektury systemu STOS 2025 wprowadzono trzy główne komponenty: \textbf{master}, \textbf{worker} oraz \textbf{adapter}. Komponent \textbf{master} pełni rolę koordynatora, zarządzając zadaniami i przydzielając je do dostępnych \textbf{workerów}, które są odpowiedzialne za wykonywanie zadań. \textbf{adapter} działa jako pośrednik między systemem STOS GUI a komponentami wykonawczymi, obsługując komunikację i integrację z zewnętrznymi usługami, takimi jak telemetry. Głowną zalętą tego podejścia było uniezależnienie komponentów wykonawczych od bezpośredniej komunikacji z interfejsem STOS GUI, co było bardzo przydatne na wczesnym etapie projektowania i implementacji systemu.
+Do zalet tego podejścia należy:
+\begin{itemize}
+    \item Centralne zarządzanie zadaniami przez komponent \textbf{master}, co ułatwia kontrolę i monitorowanie stanu zadań.
+    \item Modularna struktura, umożliwiająca niezależny rozwój i skalowanie poszczególnych komponentów.
+    \item Ułatwiona integracja z istniejącym interfejsem STOS GUI poprzez \textbf{adapter}.
+    \item Brak wpływu interfeju HTTP API STOS GUI na komponenty inne niż \textbf{adapter}.
+    \item W przypadku zastąpienia komponentu \textbf{STOS GUI} innym rozwiązaniem, możliwe jest dzaiłanie z pominięciem \textbf{adapter}.
+    \item Możliwość przeprowadzania testów bezpośrednio na poziomie API \textbf{master}, co ułatwia weryfikację funkcjonalności i wydajności systemu.
+\end{itemize}
+Do wad tego podejścia należy:
+\begin{itemize}
+    \item Wprowadzenie dodatkowej warstwy pośredniej (\textbf{adapter}), co może zwiększyć złożoność systemu i potencjalnie wpłynąć na wydajność.
+    \item Potencjalne wąskie gardło w postaci komponentu \textbf{master}, który może stać się przeciążony przy dużej liczbie zadań.
+    \item Konieczność synchronizacji i komunikacji między trzema różnymi komponentami, co może prowadzić do problemów z opóźnieniami i błędami.
+    \item Stanowość komponentu \textbf{master}, co wymaga dodatkowych mechanizmów zapewniających jego wysoką dostępność i odporność na awarie.
+\end{itemize}
+
+\subsubsection{Druga iteracja --- Wersja minimalna}
+
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1.8cm,
+        every node/.style={font=\small},
+        box/.style={
+                rectangle,
+                draw,
+                rounded corners,
+                minimum width=2.2cm,
+                minimum height=0.9cm,
+                align=center
+            },
+        worker/.style={
+            rectangle, draw, rounded corners,
+            fill=blue!15,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        externbox/.style={
+            rectangle, draw, rounded corners,
+            fill=orange!20,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        telemetry/.style={
+            rectangle, draw, rounded corners,
+            fill=gray!20,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        helper/.style={
+            rectangle, draw, rounded corners,
+            fill=green!20,
+            minimum width=2.2cm, minimum height=0.9cm, align=center
+        },
+        db/.style={
+                cylinder,
+                draw,
+                aspect=0.5,
+                shape border rotate=90,
+                minimum height=1cm,
+                minimum width=1cm,
+                fill=yellow!25
+            },
+        arrow/.style={-{Latex[length=2mm]}, thick}
+        ]
+
+        \node[worker] (worker1) {worker 1};
+        \node[worker, below=1.5cm of worker1] (worker2) {worker 2};
+        \node[worker, below=1.5cm of worker2] (worker3) {worker \dots};
+        \node[worker, below=1.5cm of worker3] (worker4) {worker n};
+        \node[worker, below=1.5cm of worker3] (worker4) {worker n};
+        
+        
+        
+        
+        
+        \node[externbox, left=9cm of worker1, yshift=-0.1cm] (stosGui) {stos gui};
+        \node[helper, left=9cm of worker1, yshift=-3cm] (telemetry) {telemetry};
+        
+        \node[telemetry, left=4cm of worker4, yshift=0cm] (nodeExporter) {node exporter};
+        \node[telemetry, left=0.5cm of nodeExporter] (cadvisor) {cadvisor};
+        
+        \node[draw, dashed, fit=(nodeExporter)(cadvisor), inner sep=10pt, label=above:{\textbf{monitoring}}] (monitoringGroup) {};
+        \node[draw, dashed, fit=(stosGui)(telemetry), inner sep=10pt, label=above:{\textbf{extern}}] (externGroup) {};
+        
+        \node[draw, dashed, fit=(worker1)(worker2)(worker3)(worker4), inner sep=10pt, label=above:{\textbf{workers}}] (workers) {};
+
+        \draw[arrow] (worker1) -- (stosGui) node[midway, above] {pobiera zgłoszenia, wysyła wyniki} node[midway, below] {pobiera pliki};
+        \draw[arrow, black!10] (worker2) -- (stosGui);
+        \draw[arrow, black!10] (worker3) -- (stosGui);
+        \draw[arrow, black!10] (worker4) -- (stosGui);
+
+        \draw[arrow] (worker1) -- (telemetry) node[midway, below] {loguje};
+        \draw[arrow, black!10] (worker2) -- (telemetry);
+        \draw[arrow, black!10] (worker3) -- (telemetry);
+        \draw[arrow, black!10] (worker4) -- (telemetry);
+
+        \draw[arrow] (monitoringGroup) -- (telemetry) node[midway, right] {metrykuje};
+
+    \end{tikzpicture}
+    \caption{Uproszczona architektura STOS 2025.}
+\end{figure}
+
+W drugiej iteracji architektury systemu STOS 2025 zdecydowano się na uproszczenie struktury poprzez eliminację komponentu \textbf{master} oraz \textbf{adapter}.\@ W nowym podejściu każdy \textbf{worker} komunikuje się bezpośrednio z \textbf{STOS GUI} w celu pobierania zgłoszeń i wysyłania wyników. Ta iteracja skupia się na minimalizacji liczby komponentów, co prowadzi do prostszej i bardziej efektywnej architektury.\@ Ta wersja Systemu STOS 2025 jest określana jako ``wersja minimalna'', ponieważ zawiera jedynie niezbędne elementy do realizacji podstawowej funkcjonalności systemu, eliminując wszelkie zbędne warstwy pośrednie. Wersja ta jest aktualna i stanowi podstawę do dalszego rozwoju i ewentualnego dodawania nowych funkcji w przyszłości.
+
+\paragraph*{Zalety względem poprzedniej wersji:}
+\begin{itemize}
+    \item Znaczne uproszczenie architektury poprzez eliminację komponentów pośrednich, co zmniejsza złożoność systemu i potencjalne punkty awarii.
+    \item Redukcja opóźnień komunikacyjnych dzięki bezpośredniej interakcji między \textbf{workerami} a \textbf{STOS GUI}.
+    \item Zmniejszenie obciążenia sieciowego i zasobów serwera poprzez eliminację dodatkowych warstw komunikacji.
+    \item Ułatwione wdrożenie i utrzymanie systemu dzięki mniejszej liczbie komponentów.
+    \item Bezstanowość \textbf{workerów}, co upraszcza skalowanie i zwiększa odporność na awarie.
+    \item Łatwiejsza konfiguracja i zarządzanie systemem, co może przyspieszyć procesy rozwoju i wdrażania nowych funkcji.
+    \item Brak centralnego punktu awarii w postaci \textbf{mastera}, co zwiększa ogólną niezawodność systemu.
+\end{itemize}
+\paragraph*{Wady względem poprzedniej wersji:}
+\begin{itemize}
+    \item Brak centralnego zarządzania zadaniami, co może utrudnić monitorowanie i kontrolę nad stanem zadań.
+    \item Potencjalne trudności w skalowaniu systemu przy dużej liczbie \textbf{workerów}, ponieważ każdy z nich musi bezpośrednio komunikować się z \textbf{STOS GUI}.
+    \item Ograniczona elastyczność w zarządzaniu zadaniami i ich przydzielaniu (Load Balancing).
+\end{itemize}
+
+\paragraph*{Podsumowanie}\mbox{}
+
+Pierwszy wariant architektury systemu STOS 2025 wprowadził istotne komponenty umożliwiające skalowalność i modularność systemu.\@ Jednakże, złożoność wynikająca z dodatkowych warstw komunikacyjnych oraz problematyczność w utrzymaniu skłoniła nas do opracowania uproszczonej wersji minimalnej.\@ Wersja minimalna architektury systemu STOS 2025 stanowi uproszczoną i efektywną strukturę, która eliminuje zbędne komponenty, jednocześnie zachowując kluczową funkcjonalność systemu.\@ Bezpośrednia komunikacja między \textbf{workerami} a \textbf{STOS GUI} przynosi korzyści w postaci zmniejszenia złożoności, opóźnień i obciążenia zasobów.\@ Mimo pewnych ograniczeń związanych z brakiem centralnego zarządzania zadaniami, ta iteracja architektury jest bardziej odporna na awarie i łatwiejsza w utrzymaniu, co czyni ją solidną podstawą do dalszego rozwoju systemu STOS.\@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+\subsection{Worker}
+Komponent \textbf{worker} jest odpowiedzialny za przetwarzanie zgłoszeń zadań programistycznych w systemie STOS 2025.\@ Jego głównym zadaniem jest pobieranie zgłoszeń z interfejsu STOS GUI, wykonywanie zadań w izolowanym środowisku kontenerowym oraz przesyłanie wyników oceny z powrotem do STOS GUI.\@ Na poniższym diagramie przedstawiono strukturę kodu komponentu \textbf{worker}, podzieloną na moduły.
+
+
+
+\begin{figure}[H]
+    \pgfdeclarelayer{bg}
+    \pgfdeclarelayer{fg}
+    \pgfsetlayers{bg,main,fg}
+    \centering
+    \begin{tikzpicture}[
+            box/.style={draw, thick, fill=#1!20, minimum width=4cm, minimum height=1.5cm, align=left, rounded corners},
+            subbox/.style={draw, thick, fill=#1!10, minimum width=3cm, minimum height=1cm, align=left}
+        ]
+
+        \begin{pgfonlayer}{fg}
+            \node[subbox=gray] (globals) {Globals};
+            \node[subbox=gray, anchor=north west, right=0.5cm of globals] (logger) {Logger};
+            \node[subbox=gray, anchor=north west, right=0.5cm of logger] (utils) {Utils};
+
+            \node[subbox=yellow, below=1.25cm of globals, xshift=0.5cm] (result) {Result Formatter};
+            \node[subbox=green, anchor=north west, right=0.2cm of result] (parser) {Script Parser};
+            \node[subbox=red, anchor=north west, right=0.2cm of parser] (api) {API Client};
+        \end{pgfonlayer}
+
+        \begin{pgfonlayer}{main}
+            \node[box=cyan, fit=(result) (parser) (api), inner sep=0.6cm, label={[anchor=north west]north west:Adapter}] (adapter) {};
+        \end{pgfonlayer}
+
+        \begin{pgfonlayer}{bg}
+            \node[box=blue, fit=(globals) (logger) (utils) (adapter), inner sep=0.75cm, label={[anchor=north west]north west:Worker}, fill=blue!20] (worker) {};
+        \end{pgfonlayer}
+    \end{tikzpicture}
+    \caption{Struktura kodu komponentu \textbf{worker}.}
+\end{figure}
+
+\begin{itemize}
+    \item \textbf{Worker} --- główny komponent odpowiedzialny za przetwarzanie zgłoszeń.\@ Zawiera on następujące podkomponenty:
+    \begin{itemize}
+        \item \textbf{Globals} --- moduł zawierający globalne stałe i konfiguracje używane w całym komponencie \textbf{worker}.\@ Dostęp do zmiennych środowiskowych kontenera odbywa się poprzez ten moduł.
+        \item \textbf{Logger} --- moduł odpowiedzialny za logowanie zdarzeń i błędów podczas działania \textbf{workera}.
+        \item \textbf{Utils} --- moduł zawierający funkcje pomocnicze wykorzystywane w różnych częściach kodu.\@ Głównie obejmuje funkcje do obsługi plików.
+        \item \textbf{Adapter} --- moduł odpowiedzialny za komunikację z interfejsem STOS GUI.\@ Moduł ten jest wysokopoziomowym interfejsem STOS GUI dla głownego modułu, oferując następujące funkcje:
+        \begin{itemize}
+            \item fetch\_submission (destination\_directory) --- pobiera zgłoszenie z STOS GUI i zapisuje je w podanym katalogu docelowym.
+            \item report\_result (submission\_id, result) --- przesyła wyniki oceny zgłoszenia o podanym identyfikatorze do STOS GUI.\
+            \item fetch\_problem (problem\_id, destination\_directory) --- pobiera dane zadania o podanym identyfikatorze i zapisuje je w podanym katalogu docelowym.\
+        \end{itemize}
+        W implementacji powyższego interfejsu wykorzystano następujące podmoduły:
+              \begin{itemize}
+                  \item \textbf{Result formatter} --- moduł odpowiedzialny za formatowanie wyników oceny zgłoszeń przed ich przesłaniem do STOS GUI.\@
+                  \item \textbf{Script parser} --- moduł odpowiedzialny za parsowanie skryptów zadania, które zawierają informacje o kryteriach oceniania.
+                  \item \textbf{API client} --- moduł odpowiedzialny za wykonywanie zapytań HTTP do interfejsu STOS GUI w celu pobierania zgłoszeń i przesyłania wyników.
+              \end{itemize}
+    \end{itemize}
+\end{itemize}
+
+
+\subsubsection{Przepływ sterowania w komponencie Worker}
+Poniżej przedstawiono diagram ilustrujący przepływ głównych funkcji w komponencie \textbf{worker} systemu STOS 2025.\@ Diagram ten przedstawia sekwencję wywołań funkcji oraz ich wzajemne relacje podczas przetwarzania zgłoszenia.
+
+\begin{figure}[H]
+    \centering
+    \pgfdeclarelayer{bg}
+    \pgfdeclarelayer{fg}
+    \pgfsetlayers{bg,main,fg}
+    \begin{tikzpicture}[
+            node distance=1.8cm,
+            every node/.style={font=\small},
+            box/.style={draw, rounded corners, fill=#1!20, minimum width=5cm, minimum height=1cm, align=left},
+            entry/.style={draw, rounded corners=0.25cm, fill=black!50, minimum width=0.5cm, minimum height=0.5cm, align=center},
+            arrowg/.style={-{Latex[length=2mm]}, thick, black!30},
+            arrow/.style={-{Latex[length=2mm]}, thick, black}
+        ]
+
+        
+        % \node[box=blue] (init_worker) {Inicjalizacja plików workera};
+        \node[box=cyan] (fetch_submission) {Pobierz zgłoszenie};
+        \node[entry, above=1.5cm of fetch_submission] (entry_point){};
+        \node[box=gray, right=0.5cm of fetch_submission, yshift=-3cm] (wait) {czekaj};
+        
+    
+
+
+        
+        \node[box=cyan, below=2cm of fetch_submission, xshift=-2cm] (fetch_problem) {Pobierz zadanie};
+        \node[box=blue, below=0.5cm of fetch_problem] (compiler) {Uruchom subkontener kompilatora};
+        \node[box=blue, below=0.5cm of compiler] (execution) {Uruchom subkontener wykonawczy};
+        \node[box=blue, below=0.5cm of execution] (judge) {Uruchom subkontener oceniania};
+        \node[box=cyan, below=0.5cm of judge] (report_result) {Prześlij wynik};
+        \node[box=blue, below=0.5cm of report_result] (end) {Zakończ obsługę};
+       
+        \node[draw, dashed, fit=(fetch_problem)(compiler)(execution)(judge)(report_result)(end), inner sep=10pt, label=above:{\textbf{obsługa zgłoszenia}}] (submission) {};
+        
+
+        \begin{pgfonlayer}{bg}
+            
+            % \draw[arrow] (init_worker) -- (fetch_submission);
+            \draw[arrow] (entry_point) -- (fetch_submission);
+            \draw[arrow] (fetch_submission) -- (wait) node[midway, right] {brak zgłoszeń};
+            \draw[arrow] (wait) -- ++(1, 0) -- ++(0, 3) -- (fetch_submission) node[midway, above] {powrót};
+            % Connect the submission group to the fetch_submission with straight segments
+            \draw[arrow] (submission.west) -- ++(-2,0) -- ++(0, 6.8) --(fetch_submission.west) node[midway, above] {następne zgłoszenie};
+
+
+            \draw[arrowg] (fetch_submission) -- (submission);
+            %   node[midway, right] {przetwórz zgłoszenie};
+            \draw[arrow] (fetch_problem) -- (compiler);
+            \draw[arrow] (compiler) -- (execution);
+            \draw[arrow] (execution) -- (judge);
+            \draw[arrow] (judge) -- (report_result);
+            \draw[arrow] (report_result) -- (end);
+        \end{pgfonlayer}
+
+    \end{tikzpicture}
+    \caption{Uproszczony schemat przepływu sterowania w komponencie Worker}
+\end{figure}
+
+\begin{itemize}
+    \item \textbf{Pobierz zgłoszenie} --- Główna pętla workera rozpoczyna się od próby pobrania nowego zgłoszenia z STOS GUI za pomocą funkcji \texttt{fetch\_submission}.\@ Jeżeli zgłoszenie jest dostępne, przechodzi do obsługi zgłoszenia; w przeciwnym razie przechodzi do stanu oczekiwania.
+    \item \textbf{Czekaj} --- Jeżeli nie ma dostępnych zgłoszeń, worker przechodzi w stan oczekiwania na określony czas\footnote{czas oczekiwania adaptuje się do bieżących warunków --- dynamic polling} przed ponowną próbą pobrania zgłoszenia.\@ Po upływie czasu oczekiwania wraca do głównej pętli, aby ponownie spróbować pobrać zgłoszenie.
+    \item \textbf{Obsługa zgłoszenia} --- Po pobraniu zgłoszenia, worker wykonuje następujące kroki:
+    \begin{itemize}
+        \item \textbf{Pobierz zadanie} --- Pobiera pliki zadania powiązanego ze zgłoszeniem ze STOS GUI.\
+        \item \textbf{Uruchom subkontener kompilatora} --- Worker uruchamia subkontener kompilatora i oczekuje na jego zakończenie.
+        \item \textbf{Uruchom subkontener wykonawczy} --- Worker uruchamia subkontener wykonawczy i oczekuje na jego zakończenie.
+        \item \textbf{Uruchom subkontener oceniania} --- Worker uruchamia subkontener oceniania i oczekuje na jego zakończenie.
+        \item \textbf{Prześlij wynik} --- Worker zbiera wyniki z subkontenerów, formatuje je i przesyła do STOS GUI.\
+        \item \textbf{Zakończ obsługę} --- Po przesłaniu wyników, worker kończy obsługę bieżącego zgłoszenia.\@ Worker wraca następnie do głównej pętli, aby obsłużyć kolejne zgłoszenie.
+    \end{itemize}
+\end{itemize}
+
+
+
+
+
+
+\subsubsection{Komunikacja z STOS GUI}
+
+
+Komponent \textbf{worker} komunikuje się z interfejsem STOS GUI za pomocą zapytań HTTP, korzystając z modułu \textbf{API client} wchodzącego w skład modułu \textbf{Adapter}.\@ Poniżej przedstawiono uproszczony schemat komunikacji między komponentem \textbf{worker} a STOS GUI podczas przetwarzania zgłoszenia.
+
+
+\begin{figure}[H]
+    \centering
+    \pgfdeclarelayer{bg}
+    \pgfdeclarelayer{fg}
+    \pgfsetlayers{bg,main,fg}
+    \begin{tikzpicture}[
+        node distance=1.8cm,
+        every node/.style={font=\small},
+        box/.style={draw, rounded corners, fill=#1!20, minimum width=3cm, minimum height=1cm, align=left},
+        fsapi/.style={draw, rounded corners, fill=#1!20, minimum width=3cm, minimum height=3cm, align=left},
+        worker/.style={draw, rounded corners, fill=#1!20, minimum width=3cm, minimum height=9cm, align=left},
+        entry/.style={draw, rounded corners, fill=gray!20, minimum width=0.5cm, minimum height=0.5cm, align=center},
+        arrowg/.style={-{Latex[length=2mm]}, thick, black!30},
+        rarrow/.style={-{Latex[length=2mm]}, thick, black!30},
+        darrow/.style={-{Latex[length=2mm]}, thick, black!30, dotted},
+        arrow/.style={-{Latex[length=2mm]}, thick, black}
+        ]
+
+
+        \begin{pgfonlayer}{fg}
+            \node[box=gray] (qapi) {QAPI};
+            \node[fsapi=gray, below=1cm of qapi] (fsapi) {FSAPI};
+            \node[box=gray, below=1cm of fsapi] (iores) {Results};
+            \node[draw, dashed, fit=(qapi)(fsapi)(iores), inner sep=10pt, label=above:{\textbf{STOS GUI}}] (gui) {};
+            
+            \node[worker=cyan, right=6cm of gui] (worker) {Adapter};
+            \node[draw, dashed, fit=(worker), inner sep=10pt, label=above:{\textbf{Worker}}] (workerg) {};
+        \end{pgfonlayer}
+
+
+        \begin{pgfonlayer}{main}
+            \draw[arrow] ([yshift=4cm]worker.west) -- (qapi.east) node[midway, above=0.2cm] {pobierz zgłoszenie};
+            \draw[arrow] ([yshift=2cm]worker.west) -- ([yshift=1cm]fsapi.east) node[midway, above=0.2cm] {pobierz listę plików zadania};
+            \draw[arrow] ([yshift=0cm]worker.west) -- ([yshift=-1cm]fsapi.east) node[midway, above=0.2cm] {pobierz plik(i) zadania};
+            \draw[arrow] ([yshift=-2cm]worker.west) -- (iores.east) node[midway, above=0.2cm] {prześlij wynik};
+        \end{pgfonlayer}
+
+
+        \begin{pgfonlayer}{bg}
+
+            % responses with offset
+            \draw[rarrow] (qapi.east) -- ([yshift=2cm]worker.west);
+            \draw[rarrow] ([yshift=1cm]fsapi.east) -- ([yshift=0cm]worker.west);
+            \draw[darrow] ([yshift=-1cm]fsapi.east) -- ([yshift=-2cm]worker.west);
+            \draw[rarrow] (iores.east) -- ([yshift=-4cm]worker.west);
+            %  node[midway, below] {submission data};
+        \end{pgfonlayer}
+
+    \end{tikzpicture}
+    \caption{Uproszczony schemat komunikacji między komponentem Worker a STOS GUI podczas przetwarzania zgłoszenia.}
+\end{figure}
+
+\textbf{Przebieg komunikacji:}
+\begin{enumerate}
+    \item \textbf{Pobierz zgłoszenie} --- Komponent \textbf{worker} wysyła zapytanie do endpointu QAPI STOS GUI, aby pobrać nowe zgłoszenie do przetworzenia.
+    \item \textbf{Pobierz listę plików zadania} --- W przypadku pozytywnej odpowiedzi, \textbf{worker} przystępuje do pobierania plików zadania zaczynając od wysyłania zapytania do endpointu FSAPI STOS GUI, aby pobrać listę plików zadania.
+    \item \textbf{Pobierz pliki zadania} --- Następnie, dla każdego pliku na liście, \textbf{worker} wysyła zapytanie do endpointu FSAPI STOS GUI, aby pobrać zawartość poszczególnych plików zadania.
+    \item \textbf{Prześlij wynik} --- Po zakończeniu przetwarzania zgłoszenia, \textbf{worker} przesyła wyniki oceny zgłoszenia.
+\end{enumerate}
+
+\textbf{Kierunek komunikacji i Dynamic polling:}
+Komunikacja między komponentem \textbf{worker} a STOS GUI jest inicjowana wyłącznie przez \textbf{workera}.\@ Komponent \textbf{worker} okresowo sprawdza dostępność nowych zgłoszeń, wysyłając zapytania do STOS GUI w ustalonych odstępach czasu (dynamic polling).\@ W przypadku braku dostępnych zgłoszeń, \textbf{worker} przechodzi w stan oczekiwania na określony czas przed ponowną próbą pobrania zgłoszenia.\@ To podejście minimalizuje obciążenie sieci i zasobów serwera STOS GUI, jednocześnie zapewniając, że \textbf{worker} może szybko reagować na nowe zgłoszenia, gdy tylko staną się one dostępne.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\subsubsection{Podkontenery}
+
+W celu zapewnienia izolowanego środowiska do kompilacji, wykonania i oceniania zgłoszeń, komponent \textbf{worker} korzysta z podkontenerów Docker.\@ Każdy podkontener jest odpowiedzialny za jedną z trzech głównych faz przetwarzania zgłoszenia: kompilację, wykonanie oraz ocenianie.\@ Poniżej przedstawiono opis każdego z podkontenerów oraz ich funkcje.
+\begin{itemize}
+    \item \textbf{Subkontener kompilatora} --- Odpowiada za kompilację kodu źródłowego zgłoszenia.\@ Pobiera pliki źródłowe z katalogu wejściowego, kompiluje je zgodnie z ustawieniami zadania i zapisuje wyniki kompilacji (błędy, pliki binarne) w katalogu wyjściowym.
+    \item \textbf{Subkontener wykonawczy} --- Odpowiada za uruchomienie skompilowanego programu zgłoszenia.\@ Pobiera pliki binarne z katalogu wejściowego, uruchamia je z odpowiednimi danymi wejściowymi i zapisuje wyniki wykonania (wyjście standardowe, błędy, czas wykonania) w katalogu wyjściowym.
+    \item \textbf{Subkontener oceniania} --- Odpowiada za ocenę wyników wykonania zgłoszenia.\@ Pobiera wyniki wykonania z katalogu wejściowego, porównuje je z oczekiwanymi wynikami zadania i generuje raport oceny, który jest zapisywany w katalogu wyjściowym.
+    \item \textbf{Obrazy podkontenerów} --- Każdy podkontener jest zbudowany na bazie dedykowanego obrazu Docker, który zawiera wszystkie niezbędne narzędzia i biblioteki wymagane do wykonania danej fazy przetwarzania zgłoszenia.\@ Obrazy te są utrzymywane i aktualizowane niezależnie od komponentu \textbf{worker}, co umożliwia łatwe dostosowanie środowiska do różnych języków programowania i wymagań zadań.
+    \item \textbf{Zarządzanie podkontenerami} --- Komponent \textbf{worker} zarządza cyklem życia podkontenerów, w tym ich uruchamianiem, monitorowaniem i zatrzymywaniem po zakończeniu przetwarzania zgłoszenia.\@ Każdy podkontener jest uruchamiany z odpowiednimi wolumenami Docker, które umożliwiają dostęp do katalogów wejściowych i wyjściowych.
+    \item \textbf{Bezpieczeństwo i izolacja} --- Podkontenery zapewniają izolację środowiska wykonawczego, co minimalizuje ryzyko wpływu błędów lub złośliwego kodu zgłoszenia na działanie komponentu \textbf{worker} oraz całego systemu STOS.\@ Każdy podkontener działa w odrębnym środowisku, co pozwala na bezpieczne przetwarzanie zgłoszeń od różnych użytkowników.
+\end{itemize}
+
+
+
+\subsubsection{Komunikacja z podkontenerami}
+
+Komponent \textbf{worker} komunikuje się z podkontenerami (kompilatora, wykonawczym i oceniania) za pomocą systemu plików oraz kodów wyjścia procesów.\@ Poniżej przedstawiono uproszczony schemat komunikacji między komponentem \textbf{worker} a podkontenerami podczas przetwarzania zgłoszenia.
+\begin{figure}[H]
+    \centering
+    \pgfdeclarelayer{bg}
+    \pgfdeclarelayer{fg}
+    \pgfsetlayers{bg,main,fg}
+    \begin{tikzpicture}[
+        node distance=1.8cm,
+        every node/.style={font=\small},
+        box/.style={draw, rounded corners, fill=#1!20, minimum width=3cm, minimum height=1cm, align=left},
+        entry/.style={draw, rounded corners, fill=gray!20, minimum width=0.5cm, minimum height=0.5cm, align=center},
+        arrowg/.style={-{Latex[length=2mm]}, thick, black!30},
+        arrow/.style={-{Latex[length=2mm]}, thick, black}
+        ]
+        \begin{pgfonlayer}{fg}
+            \node[box=cyan] (worker) {Worker};
+            \node[box=blue, right=6cm of worker, yshift=2cm] (compiler) {Subkontener kompilatora};
+            \node[box=blue, right=6cm of worker, yshift=0cm] (execution) {Subkontener wykonawczy};
+            \node[box=blue, right=6cm of worker, yshift=-2cm] (judge) {Subkontener oceniania};
+            \node[draw, dashed, fit=(compiler)(execution)(judge), inner sep=10pt, label=above:{\textbf{Podkontenery}}] (subcontainers) {};
+        \end{pgfonlayer}
+        \begin{pgfonlayer}{main}
+            \draw[arrow] (worker.east) -- ([yshift=2cm]compiler.west) node[midway, above] {wejście plikowe};
+            \draw[arrowg] ([yshift=1.5cm]compiler.west) -- (worker.east) node[midway, above] {kod wyjścia};
+
+            \draw[arrow] (worker.east) -- ([yshift=0cm]execution.west) node[midway, above] {wejście plikowe};
+            \draw[arrowg] ([yshift=-0.5cm]execution.west) -- (worker.east) node[midway, above] {kod wyjścia};
+
+            \draw[arrow] (worker.east) -- ([yshift=-2cm]judge.west) node[midway, above] {wejście plikowe};
+            \draw[arrowg] ([yshift=-1.5cm]judge.west) -- (worker.east) node[midway, above] {kod wyjścia};
+        \end{pgfonlayer}
+    \end{tikzpicture}
+    \caption{Uproszczony schemat komunikacji między komponentem Worker a podkontenerami podczas przetwarzania zgłoszenia.}
+\end{figure}
+\textbf{Przebieg komunikacji:}
+\begin{enumerate}
+    \item \textbf{Wejście plikowe} --- Komponent \textbf{worker} przygotowuje katalogi wejściowe dla każdego podkontenera, kopiując odpowiednie pliki zadania i zgłoszenia do tych katalogów.
+    \item \textbf{Uruchomienie podkontenera} --- Następnie, \textbf{worker} uruchamia podkontener, przekazując mu ścieżkę do katalogu wejściowego jako wolumen Docker.
+    \item \textbf{Kod wyjścia} --- Po zakończeniu działania podkontenera, \textbf{worker} odczytuje kod wyjścia procesu podkontenera, który informuje o wyniku operacji (sukces, błąd kompilacji, błąd wykonania itp.).
+    \item \textbf{Przetwarzanie wyników} --- Na podstawie kodu wyjścia oraz ewentualnych plików wynikowych generowanych przez podkontenery, \textbf{worker} przygotowuje wyniki oceny zgłoszenia do przesłania z powrotem do STOS GUI.
+\end{enumerate}
+
+
+\subsubsection{Struktura katalogów komponentu Worker}
+Poniżej przedstawiono strukturę katalogów komponentu \textbf{worker} systemu STOS 2025.\@ Struktura ta organizuje pliki i moduły w logiczny sposób, ułatwiając zarządzanie kodem i zasobami.
+\begin{verbatim}
+worker_data/
+|-- src/
+|   `-- example_src.cpp
+|-- bin/
+|-- out/
+|-- config/
+|-- logs/
+|-- std/
+\end{verbatim}
+
+
+\subsubsection{Reprezentacja danych logiki komponentu Worker --- Diagram klas}
+
+\subsection{Wzorce projektowe oraz dobre praktyki w architekurze}
+\subsubsection{Wzorce projektowe}
+W architekturze systemu STOS 2025 zastosowano następujące wzorce projektowe:
+\begin{itemize}
+    \item \textbf{Adapter} --- Wzorzec ten został zastosowany w module \textbf{Adapter} komponentu \textbf{worker}, który pełni rolę pośrednika między komponentem \textbf{worker} a interfejsem STOS GUI.\@ Adapter tłumaczy wywołania funkcji komponentu \textbf{worker} na odpowiednie zapytania HTTP do STOS GUI, umożliwiając niezależność komponentu od szczegółów implementacji interfejsu.
+    \item \textbf{Strategia} --- Wzorzec ten został zastosowany w zarządzaniu podkontenerami kompilatora, wykonawczym i oceniania.\@ Każdy podkontener implementuje określoną strategię przetwarzania zgłoszenia (kompilacja, wykonanie, ocenianie), co pozwala na łatwe dodawanie nowych strategii (np. obsługa nowych języków programowania) bez modyfikacji kodu komponentu \textbf{worker}.
+    \item \textbf{Singleton} --- Wzorzec ten został zastosowany w module \textbf{Logger}, który zapewnia globalny dostęp do instancji loggera w całym komponencie \textbf{worker}.\@ Dzięki temu wszystkie moduły mogą korzystać z tej samej instancji loggera do rejestrowania zdarzeń i błędów.
+    \item \textbf{Fasada} --- Wzorzec ten został zastosowany w module \textbf{API client}, który ukrywa złożoność komunikacji HTTP z STOS GUI za prostym interfejsem funkcji wysokiego poziomu (fetch\_submission, report\_result, fetch\_problem).\@ Fasada upraszcza interakcję komponentu \textbf{worker} z STOS GUI.
+    \item \textbf{Factory Method} --- Wzorzec ten może być zastosowany do tworzenia instancji podkontenerów na podstawie konfiguracji zadania.\@ Pozwala to na dynamiczne wybieranie odpowiedniego podkontenera (np. dla różnych języków programowania) podczas przetwarzania zgłoszenia.
+    \item \textbf{Observer} --- Wzorzec ten może być zastosowany w module \textbf{Logger} do powiadamiania różnych komponentów o zdarzeniach logowania.\@ Pozwala to na elastyczne zarządzanie logami i umożliwia dodawanie nowych mechanizmów logowania (np. do pliku, do bazy danych) bez modyfikacji kodu komponentu \textbf{worker}.
+    \item \textbf{Command} --- Wzorzec ten może być zastosowany do reprezentowania operacji wykonywanych przez podkontenery jako obiektów poleceń.\@ Umożliwia to łatwe zarządzanie kolejką zadań i ich wykonywaniem w sposób niezależny od konkretnej implementacji podkontenerów.
+    \item \textbf{Decorator} --- Wzorzec ten może być zastosowany do rozszerzania funkcjonalności podkontenerów bez modyfikacji ich kodu.\@ Pozwala to na dodawanie nowych funkcji (np. dodatkowe logowanie, monitorowanie zasobów) w sposób elastyczny i modularny.
+\end{itemize}
+\subsubsection{Dobre praktyki (nacisk na stabilność i modularność)}
+W architekturze systemu STOS 2025 zastosowano następujące dobre praktyki programistyczne, kładąc nacisk na stabilność i modularność systemu:
+\begin{itemize}
+    \item \textbf{Modularność} --- System został podzielony na niezależne moduły (komponenty, podkontenery), co ułatwia zarządzanie kodem, testowanie i rozwój.\@ Każdy moduł ma jasno określoną odpowiedzialność i interfejsy komunikacyjne.
+    \item \textbf{Izolacja} --- Komponent \textbf{worker} korzysta z podkontenerów Docker do izolacji środowiska wykonawczego, co minimalizuje ryzyko wpływu błędów lub złośliwego kodu zgłoszenia na działanie systemu.
+    \item \textbf{Obsługa błędów} --- Wprowadzono mechanizmy obsługi błędów na różnych poziomach systemu, w tym w komunikacji z STOS GUI oraz podczas uruchamiania podkontenerów.\@ Pozwala to na stabilne działanie systemu nawet w przypadku wystąpienia nieoczekiwanych sytuacji.
+    \item \textbf{Logowanie i monitorowanie} --- System posiada rozbudowany mechanizm logowania zdarzeń i błędów, co ułatwia diagnozowanie problemów i monitorowanie działania systemu.
+    \item \textbf{Konfiguracja zewnętrzna} --- Ustawienia systemu są przechowywane w plikach konfiguracyjnych i zmiennych środowiskowych, co umożliwia łatwe dostosowanie systemu do różnych środowisk bez konieczności modyfikacji kodu.
+    \item \textbf{Testowalność} --- Architektura systemu została zaprojektowana z myślą o łatwym testowaniu poszczególnych modułów, co pozwala na szybkie wykrywanie i naprawianie błędów.
+    \item \textbf{Skalowalność} --- System jest zaprojektowany tak, aby umożliwić łatwe skalowanie komponentów (np. dodawanie nowych workerów) w odpowiedzi na rosnące obciążenie.
+    \item \textbf{Dokumentacja} --- Kod systemu jest dobrze udokumentowany, co ułatwia zrozumienie jego działania i przyspiesza proces rozwoju oraz utrzymania.
+\end{itemize}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\newpage
+\section{Uruchomienie systemu}
+Aby uruchomić STOS 2025, należy wykonać następujące kroki:
+% \begin{enumerate}
+% \end{enumerate}
+
+
+Przykład pliku konfiguracyjnego \.env dla systemu STOS 2025:
+\begin{lstlisting}[style=envstyle]
+COMPOSE_PROJECT_NAME=stos2025
+STOS_FILES=/home/stos/Projekt_Inzynierski-2025/stos_files
+
+# GUI_URL=http://172.20.3.171:8080
+GUI_URL=http://172.20.3.170 
+
+DOCKER_SOCK=/var/run/docker.sock
+DOCKER_GID=994
+STOS_GID=993
+
+EXEC_IMAGE_NAME=d4m14n/stos:exec-1.0.1
+JUDGE_IMAGE_NAME=d4m14n/stos:judge-1.0.1
+
+
+IS_DEBUG_MODE_ENABLED=true
+\end{lstlisting}
+
+% QUEUE_COMPILER_DICT={"stos2025": "d4m14n/stos:gpp_comp-1.0.1", "stos2025-python": "d4m14n/stos:python3_comp-1.0.0"}
+
+
+\end{document}
