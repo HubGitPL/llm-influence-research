@@ -1,0 +1,5 @@
+{
+  "releases": true,
+  "total_commits": true,
+  "commits_per_year": true
+}
