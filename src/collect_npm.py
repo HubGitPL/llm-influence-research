@@ -1,5 +1,6 @@
 """Collect npm ecosystem metrics from BigQuery deps.dev v1 → data/npm_meta/*.csv."""
 import argparse
+import csv
 import json
 import re
 import subprocess
@@ -7,7 +8,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -75,6 +76,47 @@ def _get_access_token() -> str:
 def _invalidate_token_cache() -> None:
     _token_cache["token"] = None
     _token_cache["fetched_at"] = 0.0
+
+
+# --- checkpoint + CSV helpers (verbatim from collect_meta.py:53-78) ---------
+
+def _load_status(out_dir: Path) -> dict:
+    path = out_dir / "_status.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def checkpoint_exists(out_dir: Path, metric: str) -> bool:
+    return _load_status(out_dir).get(metric) is True
+
+
+def mark_done(out_dir: Path, metric: str):
+    status = _load_status(out_dir)
+    status[metric] = True
+    (out_dir / "_status.json").write_text(json.dumps(status, indent=2))
+
+
+def write_csv(filepath: Path, rows: list, fieldnames: list):
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+# canonical on-disk vocabulary (NPMECO-06 / D-06)
+STATUS_KEY = {"m1": "m1_new_packages", "m2": "m2_new_versions", "m3": "m3_cumulative"}
+CSV_NAME = {
+    "m1": "new_packages_per_year",
+    "m2": "new_versions_per_year",
+    "m3": "cumulative_packages_ever",
+}
+# Plan 03 will append m2/m3 column lists; m1 is NPMECO-03 verbatim.
+FIELDS = {"m1": ["year", "types", "other_scoped", "unscoped", "total"]}
 
 
 def _classify_bq_error(http_code: int, reason: str, body: str, project_id: str):
@@ -308,6 +350,88 @@ def resolve_snapshot(project_id: str, token: str, override=None) -> str:
     return rows[0]["max_snapshot"]
 
 
+# --- M1: new packages per year, three-way scope split ----------------------
+# D-01: query the raw PackageVersions table (not the "latest" view) and pin
+# SnapshotAt=@pin so all M1/M2/M3 share one logical snapshot — research-reproducibility invariant.
+# Pitfall 2: year bucket comes from UpstreamPublishedAt (publish time), NOT SnapshotAt.
+# Pitfall 8: three-way split — @types/*, other @-scoped, unscoped — per NPMECO-03.
+SQL_M1_NEW_PACKAGES = """
+WITH first_seen AS (
+  SELECT Name,
+         MIN(UpstreamPublishedAt) AS first_publish,
+         CASE
+           WHEN STARTS_WITH(Name, '@types/') THEN 'types'
+           WHEN STARTS_WITH(Name, '@')      THEN 'other_scoped'
+           ELSE                                  'unscoped'
+         END AS bucket
+  FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
+  WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NOT NULL
+  GROUP BY Name
+)
+SELECT EXTRACT(YEAR FROM first_publish) AS year,
+       COUNTIF(bucket = 'types')        AS types,
+       COUNTIF(bucket = 'other_scoped') AS other_scoped,
+       COUNTIF(bucket = 'unscoped')     AS unscoped,
+       COUNT(*)                         AS total
+FROM first_seen
+GROUP BY year
+ORDER BY year
+""".strip()
+
+
+# Small companion query for NPMECO-07 audit field.
+SQL_M1_NULL_COUNT = """
+SELECT COUNT(*) AS null_count
+FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
+WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NULL
+""".strip()
+
+
+def _pin_param(pinned_snapshot: str) -> list:
+    """Build the @pin TIMESTAMP BigQuery parameter."""
+    return [{
+        "name": "pin",
+        "parameterType": {"type": "TIMESTAMP"},
+        "parameterValue": {"value": pinned_snapshot},
+    }]
+
+
+def collect_m1_new_packages(out_dir, project_id, token, pinned_snapshot,
+                            force_cost_override, dry_run_only):
+    """Run M1 end-to-end. Returns (bytes_processed, upstream_published_at_null_count)."""
+    pin_param = _pin_param(pinned_snapshot)
+    bytes_est = dry_run_bytes(project_id, SQL_M1_NEW_PACKAGES, pin_param, token)
+
+    if dry_run_only:
+        print(f"  m1: dry-run = {bytes_est / 1e9:.2f} GB")
+        return (bytes_est, 0)
+
+    assert_under_budget(bytes_est, force_cost_override)
+
+    rows, bytes_used = run_bq_query(project_id, SQL_M1_NEW_PACKAGES, pin_param, token)
+    null_rows, null_bytes = run_bq_query(project_id, SQL_M1_NULL_COUNT, pin_param, token)
+    null_count = int(null_rows[0].get("null_count", 0)) if null_rows else 0
+
+    write_csv(out_dir / f"{CSV_NAME['m1']}.csv", rows, FIELDS["m1"])
+    mark_done(out_dir, STATUS_KEY["m1"])  # flip ONLY after CSV close (NPMECO-06)
+
+    return (bytes_used + null_bytes, null_count)
+
+
+def _run_metric(metric, out_dir, project_id, token, pinned_snapshot,
+                force_cost_override, dry_run_only):
+    """Dispatch one metric run. Returns (bytes_used, null_count)."""
+    if checkpoint_exists(out_dir, STATUS_KEY[metric]):
+        print(f"  {metric}: skip (already done)")
+        return (0, 0)
+    if metric == "m1":
+        return collect_m1_new_packages(
+            out_dir, project_id, token, pinned_snapshot,
+            force_cost_override, dry_run_only,
+        )
+    raise NotImplementedError(f"metric {metric} not implemented — see Plan 03")
+
+
 def assert_under_budget(bytes_estimate: int, force_override: bool) -> None:
     """50 GB dry-run cost gate (NPMECO-02 / T-06-02)."""
     if bytes_estimate <= DRY_RUN_BYTE_THRESHOLD:
@@ -373,3 +497,60 @@ def parse_args(args=None):
         help="Run queries whose dry-run estimate exceeds 50 GB (default: abort)",
     )
     return parser.parse_args(args)
+
+
+def write_run_meta(out_dir: Path, pinned_snapshot: str, project_id: str,
+                   bytes_per_metric: dict, null_counts_per_metric: dict) -> None:
+    """Write the per-run audit trail to meta.json (NPMECO-07)."""
+    payload = {
+        "run_timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "pinned_snapshot_at": pinned_snapshot,
+        "project_id": project_id,
+        "total_bytes_processed": sum(bytes_per_metric.values()),
+        "bytes_per_metric": bytes_per_metric,
+        "upstream_published_at_null_count": null_counts_per_metric,
+    }
+    (out_dir / "meta.json").write_text(json.dumps(payload, indent=2))
+
+
+def main() -> None:
+    args = parse_args()
+    out_dir = BASE_OUT
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.force:
+        (out_dir / "_status.json").unlink(missing_ok=True)
+
+    token = _get_access_token()
+    pinned_snapshot = resolve_snapshot(args.project_id, token, args.snapshot_at)
+
+    metric = normalize_metric(args.metric)
+    targets = [metric] if metric else ["m1", "m2", "m3"]
+
+    bytes_per_metric: dict = {}
+    null_counts_per_metric: dict = {}
+
+    for m in targets:
+        bytes_used, null_count = _run_metric(
+            m, out_dir, args.project_id, token, pinned_snapshot,
+            args.force_cost_override, args.dry_run_only,
+        )
+        if not args.dry_run_only and bytes_used > 0:
+            bytes_per_metric[m] = bytes_used
+            null_counts_per_metric[m] = null_count
+
+    # Warning #8: always rewrite meta.json on non-dry-run invocations, even no-ops,
+    # so every run has an audit trail (NPMECO-07 "audit each run").
+    if not args.dry_run_only:
+        write_run_meta(
+            out_dir, pinned_snapshot, args.project_id,
+            bytes_per_metric, null_counts_per_metric,
+        )
+
+    print(
+        f"Gotowe: {len(bytes_per_metric)} metryk wykonanych w tym uruchomieniu → {out_dir}/"
+    )
+
+
+if __name__ == "__main__":
+    main()
