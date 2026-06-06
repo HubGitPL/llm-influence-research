@@ -42,6 +42,7 @@ _GCLOUD_PRINT_TOKEN_CMD = (
 
 _AUTH_ERROR_HINTS = (
     "no currently active account",
+    "do not currently have an active account",
     "reauthentication required",
     "no credentials",
     "not logged in",
@@ -663,10 +664,19 @@ def main() -> None:
     null_counts_per_metric: dict = {}
 
     for m in targets:
-        bytes_used, null_count = _run_metric(
-            m, out_dir, args.project_id, token, pinned_snapshot,
-            args.force_cost_override, args.dry_run_only,
-        )
+        try:
+            bytes_used, null_count = _run_metric(
+                m, out_dir, args.project_id, token, pinned_snapshot,
+                args.force_cost_override, args.dry_run_only,
+            )
+        except BQAPIError as e:
+            # D-07 #3: classified BigQuery error → human-friendly hint + exit 2.
+            # D-08: unclassified errors propagate so the user sees the raw BQ error.
+            hint = _classify_bq_error(e.http_code, e.reason, e.message, args.project_id)
+            if hint is not None:
+                print(f"Error: {hint}", file=sys.stderr)
+                sys.exit(2)
+            raise
         if not args.dry_run_only and bytes_used > 0:
             bytes_per_metric[m] = bytes_used
             null_counts_per_metric[m] = null_count

@@ -22,3 +22,9 @@ build/
 # Local dirs not part of the project
 tests/
 .planning/
+
+# v3.0 npm BigQuery collector — exclude operator-private meta.json (contains GCP project_id)
+# and the _status.json checkpoint file; include research deliverables (METHODOLOGY.md, the 3 CSVs)
+data/npm_meta/*
+!data/npm_meta/METHODOLOGY.md
+!data/npm_meta/*.csv
