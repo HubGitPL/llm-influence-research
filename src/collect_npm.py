@@ -1,10 +1,13 @@
 """Collect npm ecosystem metrics from BigQuery deps.dev v1 → data/npm_meta/*.csv."""
+import argparse
 import json
+import re
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 
@@ -233,3 +236,140 @@ def run_bq_query(project_id: str, sql: str, query_params: list, token=None):
             return rows + extra_rows, poll_bytes + extra_bytes
 
     raise BQAPIError(0, "async_timeout", f"job {job_id} did not complete within {ASYNC_HARD_CAP_SECONDS}s")
+
+
+_PROJECT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
+
+
+def _validate_project_id(project_id: str) -> str:
+    """Reject project-ids that don't match GCP rules (T-06-03)."""
+    if not _PROJECT_ID_PATTERN.match(project_id):
+        print(
+            f"Error: invalid --project-id format: {project_id} "
+            "(must match GCP project rules: lowercase, digits, hyphens, 6-30 chars)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return project_id
+
+
+def _validate_snapshot_format(s: str) -> str:
+    """Parse ISO-8601 before any SQL substitution (T-06-03)."""
+    candidate = s[:-1] if s.endswith("Z") else s
+    try:
+        datetime.fromisoformat(candidate)
+    except ValueError:
+        print(f"Error: --snapshot-at must be ISO-8601 (got: {s})", file=sys.stderr)
+        sys.exit(2)
+    return s
+
+
+def resolve_snapshot(project_id: str, token: str, override=None) -> str:
+    """Resolve a pinned SnapshotAt — auto-pick MAX, or validate user override."""
+    if override:
+        _validate_snapshot_format(override)
+        probe_sql = (
+            "SELECT 1 AS ok FROM `bigquery-public-data.deps_dev_v1.Snapshots` "
+            "WHERE System='NPM' AND SnapshotAt=@pin LIMIT 1"
+        )
+        params = [{
+            "name": "pin",
+            "parameterType": {"type": "TIMESTAMP"},
+            "parameterValue": {"value": override},
+        }]
+        rows, _ = run_bq_query(project_id, probe_sql, params, token)
+        if not rows:
+            available_sql = (
+                "SELECT SnapshotAt AS s FROM `bigquery-public-data.deps_dev_v1.Snapshots` "
+                "WHERE System='NPM' ORDER BY SnapshotAt DESC LIMIT 10"
+            )
+            try:
+                avail_rows, _ = run_bq_query(project_id, available_sql, [], token)
+            except BQAPIError:
+                avail_rows = []
+            print(
+                f"Error: --snapshot-at {override} not found in Snapshots table.",
+                file=sys.stderr,
+            )
+            if avail_rows:
+                print("Available snapshots (most recent first):", file=sys.stderr)
+                for r in avail_rows:
+                    print(f"  {r.get('s')}", file=sys.stderr)
+            sys.exit(2)
+        return override
+
+    default_sql = (
+        "SELECT MAX(SnapshotAt) AS max_snapshot "
+        "FROM `bigquery-public-data.deps_dev_v1.Snapshots` WHERE System='NPM'"
+    )
+    rows, _ = run_bq_query(project_id, default_sql, [], token)
+    if not rows:
+        raise BQAPIError(0, "no_snapshots", "Snapshots table returned no NPM rows")
+    return rows[0]["max_snapshot"]
+
+
+def assert_under_budget(bytes_estimate: int, force_override: bool) -> None:
+    """50 GB dry-run cost gate (NPMECO-02 / T-06-02)."""
+    if bytes_estimate <= DRY_RUN_BYTE_THRESHOLD:
+        return
+    gb = bytes_estimate / 1e9
+    if force_override:
+        print(
+            f"  WARN: dry-run estimate {gb:.2f} GB exceeds 50 GB threshold — "
+            "running because --force-cost-override is set",
+            file=sys.stderr,
+        )
+        return
+    print(
+        f"Error: dry-run estimate {gb:.2f} GB exceeds 50 GB threshold. "
+        "Re-run with --force-cost-override if intentional.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
+def normalize_metric(metric):
+    """Map user-facing alias to canonical m1/m2/m3, or None for 'run all'."""
+    if metric is None or metric == "all":
+        return None
+    mapping = {"new-packages": "m1", "new-versions": "m2", "cumulative": "m3"}
+    return mapping.get(metric, metric)
+
+
+def parse_args(args=None):
+    parser = argparse.ArgumentParser(
+        description="Collect npm ecosystem metrics from BigQuery deps.dev."
+    )
+    parser.add_argument(
+        "--project-id",
+        required=True,
+        type=_validate_project_id,
+        help="GCP project id for BigQuery jobs.query (billing/quota target)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore _status.json and re-run all metrics",
+    )
+    parser.add_argument(
+        "--metric",
+        choices=["m1", "new-packages", "m2", "new-versions", "m3", "cumulative", "all"],
+        default=None,
+        help="Run only one metric (omit or 'all' = run all 3 in sequence)",
+    )
+    parser.add_argument(
+        "--dry-run-only",
+        action="store_true",
+        help="Print byte-scan estimate per query without executing",
+    )
+    parser.add_argument(
+        "--snapshot-at",
+        default=None,
+        help="Override pinned SnapshotAt (ISO-8601). Default: MAX(SnapshotAt) WHERE System='NPM'",
+    )
+    parser.add_argument(
+        "--force-cost-override",
+        action="store_true",
+        help="Run queries whose dry-run estimate exceeds 50 GB (default: abort)",
+    )
+    return parser.parse_args(args)
