@@ -335,9 +335,10 @@ def resolve_snapshot(project_id: str, token: str, override=None) -> str:
     """Resolve a pinned SnapshotAt — auto-pick MAX, or validate user override."""
     if override:
         _validate_snapshot_format(override)
+        # deps.dev Snapshots is a single-column TIMESTAMP table — no System filter.
         probe_sql = (
             "SELECT 1 AS ok FROM `bigquery-public-data.deps_dev_v1.Snapshots` "
-            "WHERE System='NPM' AND SnapshotAt=@pin LIMIT 1"
+            "WHERE SnapshotAt=@pin LIMIT 1"
         )
         params = [{
             "name": "pin",
@@ -348,7 +349,7 @@ def resolve_snapshot(project_id: str, token: str, override=None) -> str:
         if not rows:
             available_sql = (
                 "SELECT SnapshotAt AS s FROM `bigquery-public-data.deps_dev_v1.Snapshots` "
-                "WHERE System='NPM' ORDER BY SnapshotAt DESC LIMIT 10"
+                "ORDER BY SnapshotAt DESC LIMIT 10"
             )
             try:
                 avail_rows, _ = run_bq_query(project_id, available_sql, [], token)
@@ -365,13 +366,14 @@ def resolve_snapshot(project_id: str, token: str, override=None) -> str:
             sys.exit(2)
         return override
 
+    # deps.dev Snapshots is a single-column TIMESTAMP table — no System filter.
     default_sql = (
         "SELECT MAX(SnapshotAt) AS max_snapshot "
-        "FROM `bigquery-public-data.deps_dev_v1.Snapshots` WHERE System='NPM'"
+        "FROM `bigquery-public-data.deps_dev_v1.Snapshots`"
     )
     rows, _ = run_bq_query(project_id, default_sql, [], token)
-    if not rows:
-        raise BQAPIError(0, "no_snapshots", "Snapshots table returned no NPM rows")
+    if not rows or rows[0].get("max_snapshot") is None:
+        raise BQAPIError(0, "no_snapshots", "Snapshots table returned no rows")
     return _bq_timestamp_to_iso(rows[0]["max_snapshot"])
 
 
