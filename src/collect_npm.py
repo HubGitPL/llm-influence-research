@@ -310,6 +310,27 @@ def _validate_snapshot_format(s: str) -> str:
     return s
 
 
+def _bq_timestamp_to_iso(raw: str) -> str:
+    """Normalize a BigQuery TIMESTAMP field to ISO-8601 UTC.
+
+    BigQuery REST returns TIMESTAMP columns as float-seconds-since-epoch encoded
+    as a string (e.g. "1730419200.000000"). Anything else (already ISO, datetime
+    object) is also accepted so this helper is safe to apply at the boundary.
+    """
+    if isinstance(raw, datetime):
+        dt = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    else:
+        s = str(raw).strip()
+        try:
+            dt = datetime.fromtimestamp(float(s), tz=timezone.utc)
+        except ValueError:
+            candidate = s[:-1] + "+00:00" if s.endswith("Z") else s
+            dt = datetime.fromisoformat(candidate)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def resolve_snapshot(project_id: str, token: str, override=None) -> str:
     """Resolve a pinned SnapshotAt — auto-pick MAX, or validate user override."""
     if override:
@@ -351,7 +372,7 @@ def resolve_snapshot(project_id: str, token: str, override=None) -> str:
     rows, _ = run_bq_query(project_id, default_sql, [], token)
     if not rows:
         raise BQAPIError(0, "no_snapshots", "Snapshots table returned no NPM rows")
-    return rows[0]["max_snapshot"]
+    return _bq_timestamp_to_iso(rows[0]["max_snapshot"])
 
 
 # --- M1: new packages per year, three-way scope split ----------------------
