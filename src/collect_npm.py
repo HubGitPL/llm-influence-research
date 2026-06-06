@@ -42,6 +42,7 @@ _GCLOUD_PRINT_TOKEN_CMD = (
 
 _AUTH_ERROR_HINTS = (
     "no currently active account",
+    "do not currently have an active account",
     "reauthentication required",
     "no credentials",
     "not logged in",
@@ -115,8 +116,11 @@ CSV_NAME = {
     "m2": "new_versions_per_year",
     "m3": "cumulative_packages_ever",
 }
-# Plan 03 will append m2/m3 column lists; m1 is NPMECO-03 verbatim.
-FIELDS = {"m1": ["year", "types", "other_scoped", "unscoped", "total"]}
+FIELDS = {
+    "m1": ["year", "types", "other_scoped", "unscoped", "total"],
+    "m2": ["year", "new_versions", "new_release_versions", "new_prerelease_versions"],
+    "m3": ["year", "cumulative_packages_ever"],
+}
 
 
 def _classify_bq_error(http_code: int, reason: str, body: str, project_id: str):
@@ -418,6 +422,125 @@ def collect_m1_new_packages(out_dir, project_id, token, pinned_snapshot,
     return (bytes_used + null_bytes, null_count)
 
 
+# --- M2: new versions per year, release vs prerelease split ----------------
+# FEATURES.md §Metric 2: COUNTIF over VersionInfo.IsRelease for the split.
+# D-01: same SnapshotAt=@pin pin as M1 so all 3 CSVs share one logical snapshot.
+# Pitfall 2: year bucket is UpstreamPublishedAt (publish time), not SnapshotAt.
+SQL_M2_NEW_VERSIONS = """
+SELECT EXTRACT(YEAR FROM UpstreamPublishedAt) AS year,
+       COUNT(*)                               AS new_versions,
+       COUNTIF(VersionInfo.IsRelease)         AS new_release_versions,
+       COUNTIF(NOT VersionInfo.IsRelease)     AS new_prerelease_versions
+FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
+WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NOT NULL
+GROUP BY year
+ORDER BY year
+""".strip()
+
+
+SQL_M2_NULL_COUNT = """
+SELECT COUNT(*) AS null_count
+FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
+WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NULL
+""".strip()
+
+
+def collect_m2_new_versions(out_dir, project_id, token, pinned_snapshot,
+                            force_cost_override, dry_run_only):
+    """Run M2 end-to-end. Returns (bytes_processed, upstream_published_at_null_count)."""
+    pin_param = _pin_param(pinned_snapshot)
+    bytes_est = dry_run_bytes(project_id, SQL_M2_NEW_VERSIONS, pin_param, token)
+
+    if dry_run_only:
+        print(f"  m2: dry-run = {bytes_est / 1e9:.2f} GB")
+        return (bytes_est, 0)
+
+    assert_under_budget(bytes_est, force_cost_override)
+
+    rows, bytes_used = run_bq_query(project_id, SQL_M2_NEW_VERSIONS, pin_param, token)
+    null_rows, null_bytes = run_bq_query(project_id, SQL_M2_NULL_COUNT, pin_param, token)
+    null_count = int(null_rows[0].get("null_count", 0)) if null_rows else 0
+
+    write_csv(out_dir / f"{CSV_NAME['m2']}.csv", rows, FIELDS["m2"])
+    mark_done(out_dir, STATUS_KEY["m2"])
+
+    return (bytes_used + null_bytes, null_count)
+
+
+# --- M3: cumulative packages ever (lower bound, deps.dev unpublish gap) ----
+# FEATURES.md §Metric 4: year × first_seen cross-join trick.
+# @end_year is derived at runtime from the pinned snapshot's calendar year
+# (Blocker #3) — keeps the time series alive across reruns in later years
+# without exposing a user-facing year-range flag (NPMECO-08 surface unchanged).
+# D-01: SnapshotAt=@pin inside first_seen CTE.
+SQL_M3_CUMULATIVE_PACKAGES = """
+WITH years AS (
+  SELECT y FROM UNNEST(GENERATE_ARRAY(2010, @end_year)) AS y
+),
+first_seen AS (
+  SELECT Name, MIN(UpstreamPublishedAt) AS first_publish
+  FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
+  WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NOT NULL
+  GROUP BY Name
+)
+SELECT y.y                                  AS year,
+       COUNT(*)                             AS cumulative_packages_ever
+FROM years y
+JOIN first_seen f ON EXTRACT(YEAR FROM f.first_publish) <= y.y
+GROUP BY y.y
+ORDER BY y.y
+""".strip()
+
+
+SQL_M3_NULL_COUNT = """
+SELECT COUNT(*) AS null_count
+FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
+WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NULL
+""".strip()
+
+
+def _snapshot_year(pinned_snapshot: str) -> int:
+    """Extract calendar year from an ISO-8601 snapshot timestamp."""
+    candidate = pinned_snapshot
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    return datetime.fromisoformat(candidate).year
+
+
+def collect_m3_cumulative_packages(out_dir, project_id, token, pinned_snapshot,
+                                   force_cost_override, dry_run_only):
+    """Run M3 end-to-end. Returns (bytes_processed, upstream_published_at_null_count)."""
+    end_year = _snapshot_year(pinned_snapshot)
+    pin_param = _pin_param(pinned_snapshot)
+    end_year_param = {
+        "name": "end_year",
+        "parameterType": {"type": "INT64"},
+        "parameterValue": {"value": str(end_year)},
+    }
+    main_params = pin_param + [end_year_param]
+
+    bytes_est = dry_run_bytes(project_id, SQL_M3_CUMULATIVE_PACKAGES, main_params, token)
+
+    if dry_run_only:
+        print(f"  m3: dry-run = {bytes_est / 1e9:.2f} GB")
+        return (bytes_est, 0)
+
+    assert_under_budget(bytes_est, force_cost_override)
+
+    rows, bytes_used = run_bq_query(
+        project_id, SQL_M3_CUMULATIVE_PACKAGES, main_params, token,
+    )
+    null_rows, null_bytes = run_bq_query(
+        project_id, SQL_M3_NULL_COUNT, pin_param, token,
+    )
+    null_count = int(null_rows[0].get("null_count", 0)) if null_rows else 0
+
+    write_csv(out_dir / f"{CSV_NAME['m3']}.csv", rows, FIELDS["m3"])
+    mark_done(out_dir, STATUS_KEY["m3"])
+
+    return (bytes_used + null_bytes, null_count)
+
+
 def _run_metric(metric, out_dir, project_id, token, pinned_snapshot,
                 force_cost_override, dry_run_only):
     """Dispatch one metric run. Returns (bytes_used, null_count)."""
@@ -429,7 +552,17 @@ def _run_metric(metric, out_dir, project_id, token, pinned_snapshot,
             out_dir, project_id, token, pinned_snapshot,
             force_cost_override, dry_run_only,
         )
-    raise NotImplementedError(f"metric {metric} not implemented — see Plan 03")
+    if metric == "m2":
+        return collect_m2_new_versions(
+            out_dir, project_id, token, pinned_snapshot,
+            force_cost_override, dry_run_only,
+        )
+    if metric == "m3":
+        return collect_m3_cumulative_packages(
+            out_dir, project_id, token, pinned_snapshot,
+            force_cost_override, dry_run_only,
+        )
+    raise ValueError(f"unknown metric: {metric}")
 
 
 def assert_under_budget(bytes_estimate: int, force_override: bool) -> None:
@@ -531,10 +664,19 @@ def main() -> None:
     null_counts_per_metric: dict = {}
 
     for m in targets:
-        bytes_used, null_count = _run_metric(
-            m, out_dir, args.project_id, token, pinned_snapshot,
-            args.force_cost_override, args.dry_run_only,
-        )
+        try:
+            bytes_used, null_count = _run_metric(
+                m, out_dir, args.project_id, token, pinned_snapshot,
+                args.force_cost_override, args.dry_run_only,
+            )
+        except BQAPIError as e:
+            # D-07 #3: classified BigQuery error → human-friendly hint + exit 2.
+            # D-08: unclassified errors propagate so the user sees the raw BQ error.
+            hint = _classify_bq_error(e.http_code, e.reason, e.message, args.project_id)
+            if hint is not None:
+                print(f"Error: {hint}", file=sys.stderr)
+                sys.exit(2)
+            raise
         if not args.dry_run_only and bytes_used > 0:
             bytes_per_metric[m] = bytes_used
             null_counts_per_metric[m] = null_count
