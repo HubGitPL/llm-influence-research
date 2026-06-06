@@ -1,5 +1,6 @@
 """Collect npm ecosystem metrics from BigQuery deps.dev v1 → data/npm_meta/*.csv."""
 import argparse
+import csv
 import json
 import re
 import subprocess
@@ -7,7 +8,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -75,6 +76,47 @@ def _get_access_token() -> str:
 def _invalidate_token_cache() -> None:
     _token_cache["token"] = None
     _token_cache["fetched_at"] = 0.0
+
+
+# --- checkpoint + CSV helpers (verbatim from collect_meta.py:53-78) ---------
+
+def _load_status(out_dir: Path) -> dict:
+    path = out_dir / "_status.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def checkpoint_exists(out_dir: Path, metric: str) -> bool:
+    return _load_status(out_dir).get(metric) is True
+
+
+def mark_done(out_dir: Path, metric: str):
+    status = _load_status(out_dir)
+    status[metric] = True
+    (out_dir / "_status.json").write_text(json.dumps(status, indent=2))
+
+
+def write_csv(filepath: Path, rows: list, fieldnames: list):
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+# canonical on-disk vocabulary (NPMECO-06 / D-06)
+STATUS_KEY = {"m1": "m1_new_packages", "m2": "m2_new_versions", "m3": "m3_cumulative"}
+CSV_NAME = {
+    "m1": "new_packages_per_year",
+    "m2": "new_versions_per_year",
+    "m3": "cumulative_packages_ever",
+}
+# Plan 03 will append m2/m3 column lists; m1 is NPMECO-03 verbatim.
+FIELDS = {"m1": ["year", "types", "other_scoped", "unscoped", "total"]}
 
 
 def _classify_bq_error(http_code: int, reason: str, body: str, project_id: str):
