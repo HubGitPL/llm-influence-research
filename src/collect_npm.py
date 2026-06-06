@@ -497,3 +497,60 @@ def parse_args(args=None):
         help="Run queries whose dry-run estimate exceeds 50 GB (default: abort)",
     )
     return parser.parse_args(args)
+
+
+def write_run_meta(out_dir: Path, pinned_snapshot: str, project_id: str,
+                   bytes_per_metric: dict, null_counts_per_metric: dict) -> None:
+    """Write the per-run audit trail to meta.json (NPMECO-07)."""
+    payload = {
+        "run_timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "pinned_snapshot_at": pinned_snapshot,
+        "project_id": project_id,
+        "total_bytes_processed": sum(bytes_per_metric.values()),
+        "bytes_per_metric": bytes_per_metric,
+        "upstream_published_at_null_count": null_counts_per_metric,
+    }
+    (out_dir / "meta.json").write_text(json.dumps(payload, indent=2))
+
+
+def main() -> None:
+    args = parse_args()
+    out_dir = BASE_OUT
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.force:
+        (out_dir / "_status.json").unlink(missing_ok=True)
+
+    token = _get_access_token()
+    pinned_snapshot = resolve_snapshot(args.project_id, token, args.snapshot_at)
+
+    metric = normalize_metric(args.metric)
+    targets = [metric] if metric else ["m1", "m2", "m3"]
+
+    bytes_per_metric: dict = {}
+    null_counts_per_metric: dict = {}
+
+    for m in targets:
+        bytes_used, null_count = _run_metric(
+            m, out_dir, args.project_id, token, pinned_snapshot,
+            args.force_cost_override, args.dry_run_only,
+        )
+        if not args.dry_run_only and bytes_used > 0:
+            bytes_per_metric[m] = bytes_used
+            null_counts_per_metric[m] = null_count
+
+    # Warning #8: always rewrite meta.json on non-dry-run invocations, even no-ops,
+    # so every run has an audit trail (NPMECO-07 "audit each run").
+    if not args.dry_run_only:
+        write_run_meta(
+            out_dir, pinned_snapshot, args.project_id,
+            bytes_per_metric, null_counts_per_metric,
+        )
+
+    print(
+        f"Gotowe: {len(bytes_per_metric)} metryk wykonanych w tym uruchomieniu → {out_dir}/"
+    )
+
+
+if __name__ == "__main__":
+    main()
