@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -242,7 +243,7 @@ def _drain_pages(project_id: str, resp: dict, token: str, job_id: str = None):
         return extra_rows, extra_bytes
 
     while page_token:
-        url = f"{BQ_BASE_URL}/{project_id}/queries/{job_id}?pageToken={page_token}&location=US"
+        url = f"{BQ_BASE_URL}/{project_id}/queries/{job_id}?pageToken={urllib.parse.quote(page_token, safe='')}&location=US"
         page = _request_with_retry("GET", url, None, token)
         extra_rows.extend(_rows_from_response(page))
         extra_bytes += int(page.get("totalBytesProcessed", "0"))
@@ -677,13 +678,20 @@ def main() -> None:
     out_dir = BASE_OUT
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    metric = normalize_metric(args.metric)
+
     if args.force:
-        (out_dir / "_status.json").unlink(missing_ok=True)
+        if metric is None:
+            # clear all flags
+            (out_dir / "_status.json").unlink(missing_ok=True)
+        else:
+            # clear only the targeted metric's flag
+            status = _load_status(out_dir)
+            status.pop(STATUS_KEY[metric], None)
+            (out_dir / "_status.json").write_text(json.dumps(status, indent=2))
 
     token = _get_access_token()
     pinned_snapshot = resolve_snapshot(args.project_id, token, args.snapshot_at)
-
-    metric = normalize_metric(args.metric)
     targets = [metric] if metric else ["m1", "m2", "m3"]
 
     bytes_per_metric: dict = {}
