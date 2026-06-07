@@ -36,8 +36,7 @@ _token_cache = {"token": None, "fetched_at": 0.0}
 _GCLOUD_PRINT_TOKEN_CMD = (
     "gcloud",
     "auth",
-    "print-access-"
-    "token",
+    "print-access-token",
 )
 
 
@@ -304,12 +303,23 @@ def _validate_project_id(project_id: str) -> str:
 
 
 def _validate_snapshot_format(s: str) -> str:
-    """Parse ISO-8601 before any SQL substitution (T-06-03)."""
-    candidate = s[:-1] if s.endswith("Z") else s
+    """Parse ISO-8601 with timezone before any SQL substitution (T-06-03, IN-02).
+
+    Accepts: strings ending in Z, or strings with explicit +HH:MM offset.
+    Rejects: naive datetimes without timezone (ambiguous UTC vs local).
+    """
+    has_z = s.endswith("Z")
+    candidate = s[:-1] if has_z else s
     try:
-        datetime.fromisoformat(candidate)
+        dt = datetime.fromisoformat(candidate)
     except ValueError:
         print(f"Error: --snapshot-at must be ISO-8601 (got: {s})", file=sys.stderr)
+        sys.exit(2)
+    if not has_z and dt.tzinfo is None:
+        print(
+            f"Error: --snapshot-at requires a timezone (Z or +HH:MM) — got: {s}",
+            file=sys.stderr,
+        )
         sys.exit(2)
     return s
 
@@ -572,6 +582,8 @@ def _run_metric(metric, out_dir, project_id, token, pinned_snapshot,
                 force_cost_override, dry_run_only):
     """Dispatch one metric run. Returns (bytes_used, null_count)."""
     if checkpoint_exists(out_dir, STATUS_KEY[metric]):
+        # Early return: null_count query correctly skipped — no BQ call needed
+        # when the metric was already collected in a previous run (IN-03).
         print(f"  {metric}: skip (already done)")
         return (0, 0)
     if metric == "m1":
