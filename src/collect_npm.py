@@ -420,8 +420,8 @@ ORDER BY year
 """.strip()
 
 
-# Small companion query for NPMECO-07 audit field.
-SQL_M1_NULL_COUNT = """
+# Companion query for NPMECO-07 audit field — shared across m1/m2/m3 (IN-04).
+SQL_NULL_COUNT = """
 SELECT COUNT(*) AS null_count
 FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
 WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NULL
@@ -450,7 +450,7 @@ def collect_m1_new_packages(out_dir, project_id, token, pinned_snapshot,
     assert_under_budget(bytes_est, force_cost_override)
 
     rows, bytes_used = run_bq_query(project_id, SQL_M1_NEW_PACKAGES, pin_param, token)
-    null_rows, null_bytes = run_bq_query(project_id, SQL_M1_NULL_COUNT, pin_param, token)
+    null_rows, null_bytes = run_bq_query(project_id, SQL_NULL_COUNT, pin_param, token)
     null_count = int(null_rows[0].get("null_count", 0)) if null_rows else 0
 
     write_csv(out_dir / f"{CSV_NAME['m1']}.csv", rows, FIELDS["m1"])
@@ -475,13 +475,6 @@ ORDER BY year
 """.strip()
 
 
-SQL_M2_NULL_COUNT = """
-SELECT COUNT(*) AS null_count
-FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
-WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NULL
-""".strip()
-
-
 def collect_m2_new_versions(out_dir, project_id, token, pinned_snapshot,
                             force_cost_override, dry_run_only):
     """Run M2 end-to-end. Returns (bytes_processed, upstream_published_at_null_count)."""
@@ -495,7 +488,7 @@ def collect_m2_new_versions(out_dir, project_id, token, pinned_snapshot,
     assert_under_budget(bytes_est, force_cost_override)
 
     rows, bytes_used = run_bq_query(project_id, SQL_M2_NEW_VERSIONS, pin_param, token)
-    null_rows, null_bytes = run_bq_query(project_id, SQL_M2_NULL_COUNT, pin_param, token)
+    null_rows, null_bytes = run_bq_query(project_id, SQL_NULL_COUNT, pin_param, token)
     null_count = int(null_rows[0].get("null_count", 0)) if null_rows else 0
 
     write_csv(out_dir / f"{CSV_NAME['m2']}.csv", rows, FIELDS["m2"])
@@ -526,13 +519,6 @@ FROM years y
 JOIN first_seen f ON EXTRACT(YEAR FROM f.first_publish) <= y.y
 GROUP BY y.y
 ORDER BY y.y
-""".strip()
-
-
-SQL_M3_NULL_COUNT = """
-SELECT COUNT(*) AS null_count
-FROM `bigquery-public-data.deps_dev_v1.PackageVersions`
-WHERE System = 'NPM' AND SnapshotAt = @pin AND UpstreamPublishedAt IS NULL
 """.strip()
 
 
@@ -568,7 +554,7 @@ def collect_m3_cumulative_packages(out_dir, project_id, token, pinned_snapshot,
         project_id, SQL_M3_CUMULATIVE_PACKAGES, main_params, token,
     )
     null_rows, null_bytes = run_bq_query(
-        project_id, SQL_M3_NULL_COUNT, pin_param, token,
+        project_id, SQL_NULL_COUNT, pin_param, token,
     )
     null_count = int(null_rows[0].get("null_count", 0)) if null_rows else 0
 
