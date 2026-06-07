@@ -13,12 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-class BQAPIError(Exception):
-    def __init__(self, http_code: int, reason: str, message: str):
-        self.http_code = http_code
-        self.reason = reason
-        self.message = message
-        super().__init__(f"HTTP {http_code} [{reason}]: {message}")
+from src._utils import BQAPIError, write_csv, _load_status, checkpoint_exists, mark_done
 
 
 BQ_BASE_URL = "https://bigquery.googleapis.com/bigquery/v2/projects"
@@ -81,36 +76,6 @@ def _get_access_token() -> str:
 def _invalidate_token_cache() -> None:
     _token_cache["token"] = None
     _token_cache["fetched_at"] = 0.0
-
-
-# --- checkpoint + CSV helpers (verbatim from collect_meta.py:53-78) ---------
-
-def _load_status(out_dir: Path) -> dict:
-    path = out_dir / "_status.json"
-    if path.exists():
-        try:
-            return json.loads(path.read_text())
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
-def checkpoint_exists(out_dir: Path, metric: str) -> bool:
-    return _load_status(out_dir).get(metric) is True
-
-
-def mark_done(out_dir: Path, metric: str):
-    status = _load_status(out_dir)
-    status[metric] = True
-    (out_dir / "_status.json").write_text(json.dumps(status, indent=2))
-
-
-def write_csv(filepath: Path, rows: list, fieldnames: list):
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 # canonical on-disk vocabulary (NPMECO-06 / D-06)
