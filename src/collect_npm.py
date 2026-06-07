@@ -69,9 +69,13 @@ def _get_access_token() -> str:
             print("Error: not authenticated. Run: gcloud auth login", file=sys.stderr)
             sys.exit(2)
         raise BQAPIError(0, "gcloud_failed", result.stderr.strip())
-    _token_cache["token"] = result.stdout.strip()
+    token_str = result.stdout.strip()
+    if not token_str:
+        raise BQAPIError(0, "empty_token",
+                         "gcloud auth print-access-token returned empty output — check gcloud session state")
+    _token_cache["token"] = token_str
     _token_cache["fetched_at"] = time.time()
-    return _token_cache["token"]
+    return token_str
 
 
 def _invalidate_token_cache() -> None:
@@ -269,10 +273,9 @@ def run_bq_query(project_id: str, sql: str, query_params: list, token=None):
         return rows + extra_rows, total_bytes + extra_bytes
 
     job_id = resp["jobReference"]["jobId"]
-    waited = 0
-    while waited < ASYNC_HARD_CAP_SECONDS:
+    start_time = time.monotonic()
+    while time.monotonic() - start_time < ASYNC_HARD_CAP_SECONDS:
         time.sleep(ASYNC_POLL_INTERVAL)
-        waited += ASYNC_POLL_INTERVAL
         poll_url = f"{BQ_BASE_URL}/{project_id}/queries/{job_id}?location=US"
         poll = _request_with_retry("GET", poll_url, None, token)
         if poll.get("jobComplete"):
