@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 
@@ -21,7 +22,6 @@ MAX_SEARCH_PAGE = 10
 MAX_STARS_CAP = 500_000
 REPO_FIELDS = ['owner', 'repo', 'stars', 'forks', 'language', 'created_at', 'contributors_count']
 EARLIEST_YEAR = 2008
-LATEST_YEAR = 2025
 
 
 def _parse_http_code(stderr: str) -> int:
@@ -155,22 +155,21 @@ def parse_args(args=None):
     parser.add_argument('--min-stars', type=int, required=True, help="Minimum number of stars")
     parser.add_argument('--min-contributors', type=int, required=True, help="Minimum number of contributors")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--since', type=int, help=f"Start year for creation window (repos created from SINCE-01-01 to {LATEST_YEAR}-12-31)")
+    group.add_argument('--since', type=int, help="lower bound for active year (last push >= YEAR; collect_meta uses commit data from YEAR)")
     group.add_argument('--until', type=int, help=f"End year (exclusive) for creation window (repos created from {EARLIEST_YEAR}-01-01 to (UNTIL-1)-12-31, so UNTIL is guaranteed to be a year the repo already existed)")
     parser.add_argument('--force', action='store_true', help="Ignore repos.done sentinel and re-run")
     return parser.parse_args(args)
 
 
 def build_created_window(since: int = None, until: int = None) -> str:
-    """Build GitHub search 'created:' window.
-    --since Y: repo created from Y-01-01 onwards (inclusive).
-    --until Y: repo created strictly before Y-01-01 — so Y itself is guaranteed to be a year
-               where the repo already existed and could have activity."""
+    """Build GitHub search window qualifier.
+    --since Y: repos with last push >= Y-01-01 (pushed: qualifier).
+    --until Y: repo created strictly before Y-01-01 (created: qualifier)."""
     if since is not None:
-        return f"{since}-01-01..{LATEST_YEAR}-12-31"
+        return f"pushed:>={since}-01-01"
     if until <= EARLIEST_YEAR:
         raise ValueError(f"--until must be > {EARLIEST_YEAR} (got {until})")
-    return f"{EARLIEST_YEAR}-01-01..{until - 1}-12-31"
+    return f"created:{EARLIEST_YEAR}-01-01..{until - 1}-12-31"
 
 
 def get_star_bands(min_stars: int) -> list:
@@ -195,7 +194,7 @@ def get_star_bands(min_stars: int) -> list:
 def probe_count(language: str, lo: int, hi, created_window: str) -> int:
     """Return total_count for a star band without fetching results (1 API call)."""
     star_q = f"stars:>={lo}" if hi is None else f"stars:{lo}..{hi}"
-    query = f"language:{language}+{star_q}+created:{created_window}"
+    query = f"language:{language}+{star_q}+{created_window}"
     check_search_rate_limit()
     result = subprocess.run(
         ["gh", "api", f"/search/repositories?q={query}&per_page=1"],
@@ -274,7 +273,7 @@ def search_repos_page(query: str, page: int, per_page: int = 100) -> tuple:
 def collect_band(language: str, lo: int, hi, created_window: str, seen: set) -> list:
     """Fetch candidates from one star band. Returns list of repo dicts."""
     star_q = f"stars:>={lo}" if hi is None else f"stars:{lo}..{hi}"
-    query = f"language:{language}+{star_q}+created:{created_window}"
+    query = f"language:{language}+{star_q}+{created_window}"
 
     candidates = []
     for page in range(1, MAX_SEARCH_PAGE + 1):
@@ -354,6 +353,7 @@ def main():
     done_file = data_dir / "repos.done"
     progress_file = data_dir / "repos.progress"
     meta_file = data_dir / "repos.meta.json"
+    bands_file = data_dir / "repos_bands.json"
 
     if done_file.exists() and not args.force:
         print("repos.csv już istnieje. Usuń data/repos.done lub użyj --force żeby powtórzyć.")
@@ -363,6 +363,7 @@ def main():
         progress_file.unlink(missing_ok=True)
         repos_csv.unlink(missing_ok=True)
         meta_file.unlink(missing_ok=True)
+        bands_file.unlink(missing_ok=True)
 
     if args.since is not None:
         mode, year = "since", args.since
@@ -370,18 +371,41 @@ def main():
         mode, year = "until", args.until
     created_window = build_created_window(since=args.since, until=args.until)
     meta_file.write_text(json.dumps({"mode": mode, "year": year, "created_window": created_window}, indent=2))
-    print(f"Tryb: --{mode} {year} (created:{created_window})")
+    print(f"Tryb: --{mode} {year} ({created_window})")
 
     # Stage 1: search across star bands
+    bands_cache: dict = {}
+    if bands_file.exists():
+        try:
+            bands_cache = json.loads(bands_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            bands_cache = {}
+        if bands_cache:
+            print(f"Wznawiam Stage 1: znaleziono {len(bands_cache)} ukończonych pasm w {bands_file}")
+
     print("Wyznaczam pasma gwiazdek...")
     bands = get_star_bands_dynamic(args.language, args.min_stars, created_window)
     print(f"Wyznaczono {len(bands)} pasm")
     seen: set = set()
     candidates = []
+
+    for band_key, band_results in bands_cache.items():
+        for r in band_results:
+            fn = f"{r['owner']}/{r['repo']}"
+            seen.add(fn)
+        candidates.extend(band_results)
+
     for lo, hi in bands:
+        band_key = f"{lo}_{hi}"
+        if band_key in bands_cache:
+            print(f"  skipping completed band {lo}..{hi if hi else '*'} (cached)")
+            continue
         print(f"Szukam w paśmie stars:{lo}..{hi if hi else '*'}")
         band_results = collect_band(args.language, lo, hi, created_window, seen)
         candidates.extend(band_results)
+        bands_cache[band_key] = band_results
+        bands_file.write_text(json.dumps(bands_cache, indent=2))
+
     print(f"Znaleziono {len(candidates)} unikalnych kandydatów")
 
     # Stage 2: contributor filter with progress tracking
@@ -412,6 +436,7 @@ def main():
 
     progress_file.unlink(missing_ok=True)
     done_file.touch()
+    bands_file.unlink(missing_ok=True)
     print(f"Gotowe: {accepted} repo zapisano do {repos_csv}")
 
 
