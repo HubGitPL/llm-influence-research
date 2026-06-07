@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 
@@ -210,9 +211,6 @@ def load_repos_csv(path: Path) -> list:
         return list(csv.DictReader(f))
 
 
-LATEST_YEAR = 2025
-
-
 def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Collect metadata for OSS repos from repos.csv.")
     parser.add_argument("--since", type=int, default=None, help="Start year for per-year commit counts. If omitted, derived from repos.meta.json or min(created_at) in repos.csv")
@@ -252,13 +250,13 @@ def resolve_year_bounds(cli_since: int, cli_until: int, meta: dict, repos: list)
 
     if mode == "since" and meta_year is not None:
         since_year = cli_since if cli_since is not None else meta_year
-        until_year = cli_until if cli_until is not None else LATEST_YEAR
+        until_year = cli_until if cli_until is not None else datetime.now().year
     elif mode == "until" and meta_year is not None:
         since_year = cli_since if cli_since is not None else derive_since_from_repos(repos)
         until_year = cli_until if cli_until is not None else meta_year
     else:
         since_year = cli_since if cli_since is not None else derive_since_from_repos(repos)
-        until_year = cli_until if cli_until is not None else LATEST_YEAR
+        until_year = cli_until if cli_until is not None else datetime.now().year
 
     if since_year > until_year:
         print(f"Error: since_year ({since_year}) > until_year ({until_year})", file=sys.stderr)
@@ -269,7 +267,9 @@ def resolve_year_bounds(cli_since: int, cli_until: int, meta: dict, repos: list)
 RELEASE_META_FIELDS = ["tag_name", "published_at", "prerelease", "author_login"]
 
 
-def collect_releases_meta(owner: str, repo: str, out_dir: Path, since_year: int, until_year: int = 2025):
+def collect_releases_meta(owner: str, repo: str, out_dir: Path, since_year: int, until_year: int = None):
+    if until_year is None:
+        until_year = datetime.now().year
     if checkpoint_exists(out_dir, "releases"):
         print(f"  [{owner}/{repo}] releases: skip (already done)")
         return
@@ -319,7 +319,9 @@ def collect_releases_meta(owner: str, repo: str, out_dir: Path, since_year: int,
     mark_done(out_dir, "releases")
 
 
-def get_total_commit_count(owner: str, repo: str, until_year: int = 2025) -> int:
+def get_total_commit_count(owner: str, repo: str, until_year: int = None) -> int:
+    if until_year is None:
+        until_year = datetime.now().year
     url = f"/repos/{owner}/{repo}/commits?per_page=1&until={until_year}-12-31T23:59:59Z"
     try:
         raw = run_gh_with_include_retry(url)
@@ -338,7 +340,9 @@ def get_total_commit_count(owner: str, repo: str, until_year: int = 2025) -> int
         return 0
 
 
-def collect_commits_per_year(owner: str, repo: str, since_year: int, until_year: int = 2025) -> list:
+def collect_commits_per_year(owner: str, repo: str, since_year: int, until_year: int = None) -> list:
+    if until_year is None:
+        until_year = datetime.now().year
     rows = []
     for year in range(since_year, until_year + 1):
         url = (
@@ -374,6 +378,10 @@ def next_collect_dir(data_dir: Path) -> Path:
 
 def main():
     args = parse_args()
+    repos_done = Path("data") / "repos.done"
+    if not repos_done.exists():
+        print("Error: data/repos.done not found — run find_repos.py first", file=sys.stderr)
+        sys.exit(1)
     repos = load_repos_csv(Path("data/repos.csv"))
     data_dir = Path("data")
 
@@ -410,13 +418,15 @@ def main():
 
         collect_releases_meta(owner, repo, out_dir, since_year, until_year)
 
-        total = get_total_commit_count(owner, repo, until_year)
-        (out_dir / "meta.json").write_text(json.dumps({"total_commits": total}, indent=2))
-        mark_done(out_dir, "total_commits")
+        if not checkpoint_exists(out_dir, "total_commits"):
+            total = get_total_commit_count(owner, repo, until_year)
+            (out_dir / "meta.json").write_text(json.dumps({"total_commits": total}, indent=2))
+            mark_done(out_dir, "total_commits")
 
-        per_year = collect_commits_per_year(owner, repo, since_year, until_year)
-        write_csv(out_dir / "commits_per_year.csv", per_year, ["year", "count"])
-        mark_done(out_dir, "commits_per_year")
+        if not checkpoint_exists(out_dir, "commits_per_year"):
+            per_year = collect_commits_per_year(owner, repo, since_year, until_year)
+            write_csv(out_dir / "commits_per_year.csv", per_year, ["year", "count"])
+            mark_done(out_dir, "commits_per_year")
 
         print(f"  [{owner}/{repo}] done")
 
