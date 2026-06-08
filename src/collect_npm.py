@@ -167,6 +167,9 @@ def _request_with_retry(method: str, url: str, body, token: str):
 
             retry_5xx = code in (500, 502, 503, 504)
             retry_throttle = code == 403 and reason in ("rateLimitExceeded", "quotaExceeded")
+            if retry_throttle and reason == "quotaExceeded":
+                raise BQAPIError(code, reason,
+                    "Daily BigQuery quota exhausted — re-run tomorrow or increase quota limit.")
             if retry_5xx or retry_throttle:
                 attempt += 1
                 if attempt >= MAX_ATTEMPTS:
