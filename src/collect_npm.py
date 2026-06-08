@@ -50,8 +50,11 @@ def _get_access_token() -> str:
         return _token_cache["token"]
     try:
         result = subprocess.run(
-            _GCLOUD_PRINT_TOKEN_CMD, capture_output=True, text=True,
+            _GCLOUD_PRINT_TOKEN_CMD, capture_output=True, text=True, timeout=30,
         )
+    except subprocess.TimeoutExpired:
+        print("Error: gcloud auth print-access-token timed out after 30s", file=sys.stderr)
+        sys.exit(2)
     except FileNotFoundError:
         print(
             "Error: gcloud SDK not installed. Install: https://cloud.google.com/sdk/install",
