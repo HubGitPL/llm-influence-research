@@ -547,9 +547,11 @@ def collect_m3_cumulative_packages(out_dir, project_id, token, pinned_snapshot,
 # --- M4: median direct dependencies per package per year -------------------
 # Join PackageVersions × DependenciesLatest on (System, Name, Version).
 # MinimumDepth = 1 selects direct (non-transitive) edges — the DependenciesLatest
-# table has no Type column, so runtime/dev/peer deps cannot be separated at the
-# BigQuery layer. SnapshotAt filter belongs on PackageVersions only; DependenciesLatest
-# is a "latest snapshot" view and must not be filtered by @pin on its own columns.
+# DependenciesLatest has no SnapshotAt column (it is a "latest" view), so the whole
+# table would be scanned — ~54 TB. Use Dependencies (historical) with SnapshotAt = @pin
+# and explicit System = 'NPM' to let BigQuery partition-prune to a single snapshot.
+# table has no Type column, so runtime/dev/peer deps cannot be separated at the BigQuery
+# layer; MinimumDepth = 1 selects direct edges only.
 # Anchor: Decan & Mens EMSE 2019 — npm median direct deps grew from ~1 (2012) to ~5 (2016).
 SQL_M4_MEDIAN_DEPS = """
 WITH dep_counts AS (
@@ -559,13 +561,15 @@ WITH dep_counts AS (
     EXTRACT(YEAR FROM pv.UpstreamPublishedAt) AS year,
     COUNT(*) AS dep_count
   FROM `bigquery-public-data.deps_dev_v1.PackageVersions` AS pv
-  INNER JOIN `bigquery-public-data.deps_dev_v1.DependenciesLatest` AS dl
-    ON pv.System = dl.System AND pv.Name = dl.Name AND pv.Version = dl.Version
+  INNER JOIN `bigquery-public-data.deps_dev_v1.Dependencies` AS d
+    ON d.System = pv.System AND d.Name = pv.Name AND d.Version = pv.Version
   WHERE
     pv.System = 'NPM'
     AND pv.SnapshotAt = @pin
     AND pv.UpstreamPublishedAt IS NOT NULL
-    AND dl.MinimumDepth = 1
+    AND d.System = 'NPM'
+    AND d.SnapshotAt = @pin
+    AND d.MinimumDepth = 1
   GROUP BY pv.Name, pv.Version, year
 )
 SELECT
