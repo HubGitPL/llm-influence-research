@@ -719,8 +719,11 @@ def main() -> None:
 
     if args.force:
         if metric is None:
-            # clear all flags
-            (out_dir / "_status.json").unlink(missing_ok=True)
+            # wipe only the metrics that will actually re-run (m4 is opt-in; don't touch its checkpoint)
+            status = _load_status(out_dir)
+            for m in ["m1", "m2", "m3"]:
+                status.pop(STATUS_KEY[m], None)
+            (out_dir / "_status.json").write_text(json.dumps(status, indent=2))
         else:
             # clear only the targeted metric's flag
             status = _load_status(out_dir)
