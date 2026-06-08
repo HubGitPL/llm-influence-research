@@ -2,9 +2,11 @@
 import argparse
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -710,7 +712,17 @@ def write_run_meta(out_dir: Path, pinned_snapshot: str, project_id: str,
         "bytes_per_metric": bytes_per_metric,
         "upstream_published_at_null_count": null_counts_per_metric,
     }
-    (out_dir / "meta.json").write_text(json.dumps(payload, indent=2))
+    fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".meta_tmp_", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, indent=2))
+        os.replace(tmp_path, out_dir / "meta.json")
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def main() -> None:
