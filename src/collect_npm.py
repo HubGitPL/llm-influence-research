@@ -79,16 +79,23 @@ def _invalidate_token_cache() -> None:
 
 
 # canonical on-disk vocabulary (NPMECO-06 / D-06)
-STATUS_KEY = {"m1": "m1_new_packages", "m2": "m2_new_versions", "m3": "m3_cumulative"}
+STATUS_KEY = {
+    "m1": "m1_new_packages",
+    "m2": "m2_new_versions",
+    "m3": "m3_cumulative",
+    "m4": "m4_median_deps",
+}
 CSV_NAME = {
     "m1": "new_packages_per_year",
     "m2": "new_versions_per_year",
     "m3": "cumulative_packages_ever",
+    "m4": "median_deps_per_year",
 }
 FIELDS = {
     "m1": ["year", "types", "other_scoped", "unscoped", "total"],
     "m2": ["year", "new_versions", "new_release_versions", "new_prerelease_versions"],
     "m3": ["year", "cumulative_packages_ever"],
+    "m4": ["year", "median_direct_deps", "package_count"],
 }
 
 
@@ -529,6 +536,61 @@ def collect_m3_cumulative_packages(out_dir, project_id, token, pinned_snapshot,
     return (bytes_used + null_bytes, null_count)
 
 
+# --- M4: median direct dependencies per package per year -------------------
+# Join PackageVersions × DependenciesLatest on (System, Name, Version).
+# MinimumDepth = 1 selects direct (non-transitive) edges — the DependenciesLatest
+# table has no Type column, so runtime/dev/peer deps cannot be separated at the
+# BigQuery layer. SnapshotAt filter belongs on PackageVersions only; DependenciesLatest
+# is a "latest snapshot" view and must not be filtered by @pin on its own columns.
+# Anchor: Decan & Mens EMSE 2019 — npm median direct deps grew from ~1 (2012) to ~5 (2016).
+SQL_M4_MEDIAN_DEPS = """
+WITH dep_counts AS (
+  SELECT
+    pv.Name,
+    EXTRACT(YEAR FROM pv.UpstreamPublishedAt) AS year,
+    COUNT(*) AS dep_count
+  FROM `bigquery-public-data.deps_dev_v1.PackageVersions` AS pv
+  INNER JOIN `bigquery-public-data.deps_dev_v1.DependenciesLatest` AS dl
+    ON pv.System = dl.System AND pv.Name = dl.Name AND pv.Version = dl.Version
+  WHERE
+    pv.System = 'NPM'
+    AND pv.SnapshotAt = @pin
+    AND pv.UpstreamPublishedAt IS NOT NULL
+    AND dl.MinimumDepth = 1
+  GROUP BY pv.Name, year
+)
+SELECT
+  year,
+  APPROX_QUANTILES(dep_count, 100)[OFFSET(50)] AS median_direct_deps,
+  COUNT(*) AS package_count
+FROM dep_counts
+GROUP BY year
+ORDER BY year
+""".strip()
+
+
+def collect_m4_median_deps(out_dir, project_id, token, pinned_snapshot,
+                           force_cost_override, dry_run_only):
+    """Run M4 end-to-end. Returns (bytes_processed, upstream_published_at_null_count)."""
+    pin_param = _pin_param(pinned_snapshot)
+    bytes_est = dry_run_bytes(project_id, SQL_M4_MEDIAN_DEPS, pin_param, token)
+
+    if dry_run_only:
+        print(f"  m4: dry-run = {bytes_est / 1e9:.2f} GB")
+        return (bytes_est, 0)
+
+    assert_under_budget(bytes_est, force_cost_override)
+
+    rows, bytes_used = run_bq_query(project_id, SQL_M4_MEDIAN_DEPS, pin_param, token)
+    null_rows, null_bytes = run_bq_query(project_id, SQL_NULL_COUNT, pin_param, token)
+    null_count = int(null_rows[0].get("null_count", 0)) if null_rows else 0
+
+    write_csv(out_dir / f"{CSV_NAME['m4']}.csv", rows, FIELDS["m4"])
+    mark_done(out_dir, STATUS_KEY["m4"])
+
+    return (bytes_used + null_bytes, null_count)
+
+
 def _run_metric(metric, out_dir, project_id, token, pinned_snapshot,
                 force_cost_override, dry_run_only):
     """Dispatch one metric run. Returns (bytes_used, null_count)."""
@@ -549,6 +611,11 @@ def _run_metric(metric, out_dir, project_id, token, pinned_snapshot,
         )
     if metric == "m3":
         return collect_m3_cumulative_packages(
+            out_dir, project_id, token, pinned_snapshot,
+            force_cost_override, dry_run_only,
+        )
+    if metric == "m4":
+        return collect_m4_median_deps(
             out_dir, project_id, token, pinned_snapshot,
             force_cost_override, dry_run_only,
         )
@@ -576,10 +643,15 @@ def assert_under_budget(bytes_estimate: int, force_override: bool) -> None:
 
 
 def normalize_metric(metric):
-    """Map user-facing alias to canonical m1/m2/m3, or None for 'run all'."""
+    """Map user-facing alias to canonical m1/m2/m3/m4, or None for 'run all'."""
     if metric is None or metric == "all":
         return None
-    mapping = {"new-packages": "m1", "new-versions": "m2", "cumulative": "m3"}
+    mapping = {
+        "new-packages": "m1",
+        "new-versions": "m2",
+        "cumulative": "m3",
+        "median-deps": "m4",
+    }
     return mapping.get(metric, metric)
 
 
@@ -600,9 +672,10 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--metric",
-        choices=["m1", "new-packages", "m2", "new-versions", "m3", "cumulative", "all"],
+        choices=["m1", "new-packages", "m2", "new-versions", "m3", "cumulative",
+                 "m4", "median-deps", "all"],
         default=None,
-        help="Run only one metric (omit or 'all' = run all 3 in sequence)",
+        help="Run only one metric (omit or 'all' = run m1/m2/m3; m4 is opt-in only)",
     )
     parser.add_argument(
         "--dry-run-only",
