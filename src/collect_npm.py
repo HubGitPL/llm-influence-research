@@ -689,7 +689,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--snapshot-at",
         default=None,
-        help="Override pinned SnapshotAt (ISO-8601). Default: MAX(SnapshotAt) WHERE System='NPM'",
+        help="Override pinned SnapshotAt (ISO-8601). Default: MAX(Time) from deps_dev_v1.Snapshots",
     )
     parser.add_argument(
         "--force-cost-override",
