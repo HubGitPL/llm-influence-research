@@ -547,6 +547,7 @@ SQL_M4_MEDIAN_DEPS = """
 WITH dep_counts AS (
   SELECT
     pv.Name,
+    pv.Version,
     EXTRACT(YEAR FROM pv.UpstreamPublishedAt) AS year,
     COUNT(*) AS dep_count
   FROM `bigquery-public-data.deps_dev_v1.PackageVersions` AS pv
@@ -557,7 +558,7 @@ WITH dep_counts AS (
     AND pv.SnapshotAt = @pin
     AND pv.UpstreamPublishedAt IS NOT NULL
     AND dl.MinimumDepth = 1
-  GROUP BY pv.Name, year
+  GROUP BY pv.Name, pv.Version, year
 )
 SELECT
   year,
