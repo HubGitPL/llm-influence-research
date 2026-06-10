@@ -1,16 +1,11 @@
 from typing import Any, List
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
-
+from utils import globals
 from pydantic import BaseModel
-import requests_cache
 
 
-SESSION = requests_cache.CachedSession(
-    "cache_db",   # plik SQLite na dysku
-    expire_after=3600
-)
-    
+
     
 class PyPIReleaseStats(BaseModel):
     release_count: int
@@ -29,23 +24,22 @@ class ExtractedPackageInfo(BaseModel):
 
 
 
-def get_top_packages() -> List[str]:
+async def get_top_packages() -> List[str]:
     url = r"https://hugovk.github.io/top-pypi-packages/top-pypi-packages-30-days.json"
-    response = SESSION.get(url)
-    response.raise_for_status()
-    data = response.json()
+    async with  globals.SESSION.get(url) as response:
+        data = await response.json()
     top_packages = data.get("rows", [])
     top_packages_names = [pkg["project"].strip() for pkg in top_packages]
     return top_packages_names
 
 
-def get_pypi(name: str) -> Any:
-    url = f"https://pypi.org/pypi/{name}/json"
-    r = SESSION.get(url)
-    if r.status_code != 200:
-        return None
-    return r.json()
 
+async def get_pypi(name: str) -> Any:
+    url = f"https://pypi.org/pypi/{name}/json"
+    async with globals.SESSION.get(url) as r:
+        if r.status != 200:
+            return None
+        return await r.json()
 
 def get_package_github_repo_url(pypi_info: Any) -> PackageRepoInfo | None:
     PRIORITY_KEYS = [
@@ -120,7 +114,7 @@ def calculate_pypi_release_stats(pypi_info: Any, since: datetime=datetime(2008, 
     )
 
     
-def extract_package_info(packages: List[str], limit: int = 1000) -> List[ExtractedPackageInfo]:
+async def extract_package_info(packages: List[str], limit: int = 1000) -> List[ExtractedPackageInfo]:
    
     valid_limit = limit
 
@@ -130,7 +124,7 @@ def extract_package_info(packages: List[str], limit: int = 1000) -> List[Extract
             break
         
         try:
-            pypi_info = get_pypi(name)
+            pypi_info = await get_pypi(name)
         except Exception:
             continue
         if not pypi_info:

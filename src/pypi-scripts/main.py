@@ -76,10 +76,10 @@ async def main() -> None:
 
 
     try:
-        top_15k_packages = pypi.get_top_packages()
+        top_15k_packages = await pypi.get_top_packages()
         sampled_packages = repo_sampling.sample_representative_packages(top_15k_packages, n_total=200)
         print(f"Sampled {len(sampled_packages)} packages with GitHub repos.")
-        packages = pypi.extract_package_info(sampled_packages)
+        packages = await pypi.extract_package_info(sampled_packages)
         print(f"Extracted GitHub data for {len(packages)} packages.")
         
         tasks = [
