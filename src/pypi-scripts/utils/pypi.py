@@ -120,7 +120,7 @@ def calculate_pypi_release_stats(pypi_info: Any, since: datetime=datetime(2008, 
     )
 
     
-def extract_github_repo_data(packages: List[str], limit: int = 1000) -> List[ExtractedPackageInfo]:
+def extract_package_info(packages: List[str], limit: int = 1000) -> List[ExtractedPackageInfo]:
    
     valid_limit = limit
 
