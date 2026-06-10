@@ -1,5 +1,6 @@
 
 from typing import Any
+from pydantic import BaseModel
 from datetime import datetime, timedelta
 from queries.graphql import (
     COMMIT_COUNT_QUERY, 
@@ -9,7 +10,16 @@ from queries.graphql import (
 )
 from utils.github_api import execute_github_graphql
 
-def get_commit_count(
+
+class RepoMetrics(BaseModel):
+    package_name: str
+    commits: int
+    issues: int
+    contributors: int
+    avg_resolution_hours: float | None
+
+
+async def get_commit_count(
     token: str,
     owner: str,
     repo: str,
@@ -28,7 +38,7 @@ def get_commit_count(
         "until": f"{until.isoformat()}Z",
     }
 
-    data = execute_github_graphql(token, COMMIT_COUNT_QUERY, variables)
+    data = await execute_github_graphql(token, COMMIT_COUNT_QUERY, variables)
     repository: Any = data.get("data", {}).get("repository") or {}
     branch_ref = repository.get("defaultBranchRef")
     if not branch_ref:
@@ -38,7 +48,7 @@ def get_commit_count(
 
 
 #TODO 100 limit for contributors, pagination for more
-def get_active_contributors_count(
+async def get_active_contributors_count(
     token: str,
     owner: str,
     repo: str,
@@ -55,7 +65,7 @@ def get_active_contributors_count(
         "until": f"{until.isoformat()}Z",
     }
 
-    data = execute_github_graphql(token, ACTIVE_CONTRIBUTORS_QUERY, variables)
+    data = await execute_github_graphql(token, ACTIVE_CONTRIBUTORS_QUERY, variables)
 
     repository: Any = data.get("data", {}).get("repository") or {}
     branch_ref = repository.get("defaultBranchRef")
@@ -76,7 +86,7 @@ def get_active_contributors_count(
 
 
 
-def get_issue_count(
+async def get_issue_count(
     token: str,
     owner: str,
     repo: str,
@@ -98,7 +108,7 @@ def get_issue_count(
     )
 
     variables = {"searchQuery": search_query}
-    data = execute_github_graphql(token, ISSUE_COUNT_QUERY, variables)
+    data = await execute_github_graphql(token, ISSUE_COUNT_QUERY, variables)
     
     search_results: Any = data.get("data", {}).get("search") or {}
     return int(search_results.get("issueCount", 0))
@@ -106,7 +116,7 @@ def get_issue_count(
 
 
 
-def get_average_issue_resolution_time(
+async def get_average_issue_resolution_time(
     token: str,
     owner: str,
     repo: str,
@@ -139,7 +149,7 @@ def get_average_issue_resolution_time(
             "after": after_cursor
         }
 
-        data = execute_github_graphql(token, CLOSED_ISSUES_QUERY, variables)
+        data = await execute_github_graphql(token, CLOSED_ISSUES_QUERY, variables)
         search_data: Any = data.get("data", {}).get("search") or {}
         issues: list[Any] = search_data.get("nodes") or []
 

@@ -1,13 +1,37 @@
-from datetime import datetime, timedelta
-
-import requests
 from typing import Any, List
 from urllib.parse import urlparse
-from utils.schemas import ExtractedPackageInfo, PyPIReleaseStats
+from datetime import datetime, timedelta
+
+from pydantic import BaseModel
+import requests_cache
+
+
+SESSION = requests_cache.CachedSession(
+    "cache_db",   # plik SQLite na dysku
+    expire_after=3600
+)
+    
+    
+class PyPIReleaseStats(BaseModel):
+    release_count: int
+    average_interval: timedelta | None
+    
+class PackageRepoInfo(BaseModel):
+    repo_url: str
+    repo_name: str
+    repo_owner: str
+    
+class ExtractedPackageInfo(BaseModel):
+    package_name: str
+    repo_info: PackageRepoInfo
+    pypi_info: Any = None
+
+
+
 
 def get_top_packages() -> List[str]:
     url = r"https://hugovk.github.io/top-pypi-packages/top-pypi-packages-30-days.json"
-    response = requests.get(url)
+    response = SESSION.get(url)
     response.raise_for_status()
     data = response.json()
     top_packages = data.get("rows", [])
@@ -17,13 +41,13 @@ def get_top_packages() -> List[str]:
 
 def get_pypi(name: str) -> Any:
     url = f"https://pypi.org/pypi/{name}/json"
-    r = requests.get(url)
+    r = SESSION.get(url)
     if r.status_code != 200:
         return None
     return r.json()
 
 
-def get_package_github_repo_url(pypi_info: Any) -> str | None:
+def get_package_github_repo_url(pypi_info: Any) -> PackageRepoInfo | None:
     PRIORITY_KEYS = [
         "source",
         "repository",
@@ -45,8 +69,19 @@ def get_package_github_repo_url(pypi_info: Any) -> str | None:
                 repo_url = str(v) # type: ignore
                 break
             
-    return repo_url
+    if not repo_url:
+        return None
     
+    parsed = urlparse(repo_url)
+    parts = parsed.path.strip("/").split("/")
+    if len(parts) < 2:
+        return None
+            
+    return PackageRepoInfo(
+        repo_url=repo_url,
+        repo_owner=parts[0],
+        repo_name=parts[1]
+    )
 
 
 def calculate_pypi_release_stats(pypi_info: Any, since: datetime=datetime(2008, 1, 1), until: datetime=datetime.now()) -> PyPIReleaseStats:
@@ -85,12 +120,12 @@ def calculate_pypi_release_stats(pypi_info: Any, since: datetime=datetime(2008, 
     )
 
     
-def extract_github_repo_data(top_packages: List[str], limit: int = 25) -> List[ExtractedPackageInfo]:
+def extract_github_repo_data(packages: List[str], limit: int = 1000) -> List[ExtractedPackageInfo]:
    
     valid_limit = limit
 
     data: List[ExtractedPackageInfo] = []
-    for name in top_packages:
+    for name in packages:
         if valid_limit <= 0:
             break
         
@@ -101,25 +136,17 @@ def extract_github_repo_data(top_packages: List[str], limit: int = 25) -> List[E
         if not pypi_info:
             continue
         
-        repo_url = get_package_github_repo_url(pypi_info)
-        if not repo_url:
+        repo_result = get_package_github_repo_url(pypi_info)
+        if not repo_result:
             continue
         
-        parsed = urlparse(repo_url)
-        parts = parsed.path.strip("/").split("/")
-        if len(parts) < 2:
-            continue
-        
-        repo_owner, repo_name = parts[0], parts[1]
-        
+
         print(".", end="", flush=True)
         
         
         data.append(ExtractedPackageInfo(
             package_name=name, 
-            repo_url=repo_url, 
-            repo_name=repo_name, 
-            repo_owner=repo_owner,
+            repo_info=repo_result,
             pypi_info=pypi_info
         ))
         valid_limit -= 1
